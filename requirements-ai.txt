@@ -1,0 +1,4 @@
+# Install only when enabling optional AI layers.
+transformers>=4.45
+sentencepiece>=0.2
+pyannote.audio>=4.0
