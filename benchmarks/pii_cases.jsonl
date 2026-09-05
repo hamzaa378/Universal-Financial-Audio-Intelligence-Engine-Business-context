@@ -1,0 +1,60 @@
+{"id": "email_1", "text": "Please email me at customer.one@example.com.", "expected": [{"type": "EMAIL", "value": "customer.one@example.com"}]}
+{"id": "email_2", "text": "Registered email: ryan+loan@finmail.co.in", "expected": [{"type": "EMAIL", "value": "ryan+loan@finmail.co.in"}]}
+{"id": "email_3", "text": "Send it to <abc_25@vitstudent.ac.in> please", "expected": [{"type": "EMAIL", "value": "abc_25@vitstudent.ac.in"}]}
+{"id": "email_neg_1", "text": "An email address usually contains an at sign and a domain.", "expected": []}
+{"id": "phone_1", "text": "My mobile number is 9876543210.", "expected": [{"type": "PHONE", "value": "9876543210"}]}
+{"id": "phone_2", "text": "Call me on +91 98765 43210 tomorrow.", "expected": [{"type": "PHONE", "value": "+91 98765 43210"}]}
+{"id": "phone_3", "text": "Contact number: 91234-56789", "expected": [{"type": "PHONE", "value": "91234-56789"}]}
+{"id": "phone_4", "text": "WhatsApp me at 87654 32109", "expected": [{"type": "PHONE", "value": "87654 32109"}]}
+{"id": "phone_neg_order", "text": "The order number is 9876543210.", "expected": []}
+{"id": "phone_neg_txn", "text": "Transaction ID 9123456789 was generated successfully.", "expected": []}
+{"id": "phone_neg_short", "text": "The amount is 987654 rupees.", "expected": []}
+{"id": "pan_1", "text": "My PAN is ABCDE1234F.", "expected": [{"type": "PAN", "value": "ABCDE1234F"}]}
+{"id": "pan_2", "text": "PAN: pqrst6789z", "expected": [{"type": "PAN", "value": "pqrst6789z"}]}
+{"id": "pan_neg", "text": "The reference ABC1234F is not a PAN number.", "expected": []}
+{"id": "ifsc_1", "text": "Bank IFSC is SBIN0001234.", "expected": [{"type": "IFSC", "value": "SBIN0001234"}]}
+{"id": "ifsc_2", "text": "Use HDFC0ABC123 for this branch.", "expected": [{"type": "IFSC", "value": "HDFC0ABC123"}]}
+{"id": "ifsc_neg", "text": "Code HDFC1ABC123 is an internal identifier.", "expected": []}
+{"id": "upi_1", "text": "My UPI ID is hamza@oksbi.", "expected": [{"type": "UPI", "value": "hamza@oksbi"}]}
+{"id": "upi_2", "text": "Pay the VPA ryan.paul@ybl.", "expected": [{"type": "UPI", "value": "ryan.paul@ybl"}]}
+{"id": "upi_3", "text": "UPI: demo-user@custombank", "expected": [{"type": "UPI", "value": "demo-user@custombank"}]}
+{"id": "upi_neg_email", "text": "My email is hamza@example.com.", "expected": [{"type": "EMAIL", "value": "hamza@example.com"}]}
+{"id": "card_1", "text": "Credit card number 4111 1111 1111 1111.", "expected": [{"type": "CARD", "value": "4111 1111 1111 1111"}]}
+{"id": "card_2", "text": "Card: 5555-5555-5555-4444", "expected": [{"type": "CARD", "value": "5555-5555-5555-4444"}]}
+{"id": "card_3", "text": "Use test card 378282246310005.", "expected": [{"type": "CARD", "value": "378282246310005"}]}
+{"id": "card_neg_luhn", "text": "Reference 4111 1111 1111 1112 is not a valid card.", "expected": []}
+{"id": "aadhaar_1", "text": "Aadhaar number is 234567890124.", "expected": [{"type": "AADHAAR", "value": "234567890124"}]}
+{"id": "aadhaar_2", "text": "My Aadhar is 8765 4321 0988", "expected": [{"type": "AADHAAR", "value": "8765 4321 0988"}]}
+{"id": "aadhaar_context_synth", "text": "Aadhaar: 2345 6789 0123", "expected": [{"type": "AADHAAR", "value": "2345 6789 0123"}]}
+{"id": "aadhaar_neg", "text": "The 12 digit sample 234567890123 appears in documentation.", "expected": []}
+{"id": "account_1", "text": "My account number is 001234567890.", "expected": [{"type": "ACCOUNT_NUMBER", "value": "001234567890"}]}
+{"id": "account_2", "text": "Loan account no 12345678901234 is overdue.", "expected": [{"type": "ACCOUNT_NUMBER", "value": "12345678901234"}]}
+{"id": "account_neg", "text": "Invoice number 001234567890 was printed yesterday.", "expected": []}
+{"id": "otp_1", "text": "Your OTP is 483921. Do not share it.", "expected": [{"type": "OTP", "value": "483921"}]}
+{"id": "otp_2", "text": "Verification code: 8842", "expected": [{"type": "OTP", "value": "8842"}]}
+{"id": "otp_neg_amount", "text": "Your EMI amount is 483921 rupees.", "expected": []}
+{"id": "otp_neg_year", "text": "The loan was opened in 2024.", "expected": []}
+{"id": "cvv_1", "text": "The CVV is 391.", "expected": [{"type": "CVV", "value": "391"}]}
+{"id": "cvv_2", "text": "Card security code: 4821", "expected": [{"type": "CVV", "value": "4821"}]}
+{"id": "cvv_neg", "text": "The branch code is 391.", "expected": []}
+{"id": "pin_1", "text": "PIN code is 560001.", "expected": [{"type": "PINCODE", "value": "560001"}]}
+{"id": "pin_2", "text": "Postal code: 800006", "expected": [{"type": "PINCODE", "value": "800006"}]}
+{"id": "pin_neg", "text": "The approved amount is 560001 rupees.", "expected": []}
+{"id": "dob_1", "text": "My date of birth is 14/08/2005.", "expected": [{"type": "DOB", "value": "14/08/2005"}]}
+{"id": "dob_2", "text": "DOB: 7-1-1999", "expected": [{"type": "DOB", "value": "7-1-1999"}]}
+{"id": "dob_neg", "text": "Payment date is 14/08/2026.", "expected": []}
+{"id": "name_1", "text": "My name is Ryan Paul Joe.", "expected": [{"type": "NAME", "value": "Ryan Paul Joe"}]}
+{"id": "name_2", "text": "Name: Hamza Ahmad", "expected": [{"type": "NAME", "value": "Hamza Ahmad"}]}
+{"id": "name_neg", "text": "The field name is required for onboarding.", "expected": []}
+{"id": "address_1", "text": "My current address is Flat 12, MG Road, Bengaluru 560001.", "expected": [{"type": "ADDRESS", "value": "Flat 12, MG Road, Bengaluru 560001"}]}
+{"id": "address_2", "text": "Residential address: House 44, Sector 7, Noida, pin code 201301.", "expected": [{"type": "ADDRESS", "value": "House 44, Sector 7, Noida, pin code 201301"}]}
+{"id": "address_3", "text": "My address is 17 Lake View Road, Pune.", "expected": [{"type": "ADDRESS", "value": "17 Lake View Road, Pune"}]}
+{"id": "address_neg_explain", "text": "Address is required for KYC and is treated as personal information.", "expected": []}
+{"id": "address_neg_generic", "text": "Please update your address before continuing.", "expected": []}
+{"id": "mixed_1", "text": "My PAN is ABCDE1234F and mobile is 9876543210.", "expected": [{"type": "PAN", "value": "ABCDE1234F"}, {"type": "PHONE", "value": "9876543210"}]}
+{"id": "mixed_2", "text": "Email abc@test.co.in and UPI abc@oksbi are different identifiers.", "expected": [{"type": "EMAIL", "value": "abc@test.co.in"}, {"type": "UPI", "value": "abc@oksbi"}]}
+{"id": "spoken_email", "text": "My email is hamza dot ahmad at gmail dot com.", "expected": [{"type": "EMAIL", "value": "hamza dot ahmad at gmail dot com"}]}
+{"id": "spoken_phone", "text": "My mobile number is nine eight seven six five four three two one zero.", "expected": [{"type": "PHONE", "value": "nine eight seven six five four three two one zero"}]}
+{"id": "spoken_otp", "text": "Your OTP is four eight three nine two one.", "expected": [{"type": "OTP", "value": "four eight three nine two one"}]}
+{"id": "spoken_cvv", "text": "Card security code is four eight two one.", "expected": [{"type": "CVV", "value": "four eight two one"}]}
+{"id": "spoken_neg_amount", "text": "The amount is four eight three nine two one rupees.", "expected": []}

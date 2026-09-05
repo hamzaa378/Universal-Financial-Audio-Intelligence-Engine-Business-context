@@ -1,0 +1,24 @@
+{"id": "p1", "text": "The caller said fuck during the call.", "expected": ["fuck"]}
+{"id": "p2", "text": "He shouted f**k and disconnected.", "expected": ["fuck"]}
+{"id": "p3", "text": "This is shit service.", "expected": ["shit"]}
+{"id": "p4", "text": "The customer typed s***t in chat transcription.", "expected": ["shit"]}
+{"id": "p5", "text": "You are a bitch, he said.", "expected": ["bitch"]}
+{"id": "p6", "text": "He said b****h during the complaint.", "expected": ["bitch"]}
+{"id": "p7", "text": "That agent is an asshole.", "expected": ["asshole"]}
+{"id": "p8", "text": "The word bastard was used.", "expected": ["bastard"]}
+{"id": "p9", "text": "Customer said madarchod angrily.", "expected": ["madarchod"]}
+{"id": "p10", "text": "Customer used bhenchod in the call.", "expected": ["bhenchod"]}
+{"id": "p11", "text": "He said chutiya and hung up.", "expected": ["chutiya"]}
+{"id": "p12", "text": "The transcript contains harami.", "expected": ["harami"]}
+{"id": "p13", "text": "He spelled f u c k slowly.", "expected": ["fuck"]}
+{"id": "p14", "text": "He spelled s h i t slowly.", "expected": ["shit"]}
+{"id": "pn1", "text": "The virtual assistant explained the EMI.", "expected": []}
+{"id": "pn2", "text": "The asset class is fixed income.", "expected": []}
+{"id": "pn3", "text": "Please assign the case to collections.", "expected": []}
+{"id": "pn4", "text": "The customer discussed cash flow.", "expected": []}
+{"id": "pn5", "text": "We need assistance with the account.", "expected": []}
+{"id": "pn6", "text": "This class of loan is secured.", "expected": []}
+{"id": "pn7", "text": "The agent said the issue is serious.", "expected": []}
+{"id": "pn8", "text": "The branch is in Assam.", "expected": []}
+{"id": "pn9", "text": "The customer passed KYC.", "expected": []}
+{"id": "pn10", "text": "Please follow the process and submit the form.", "expected": []}
