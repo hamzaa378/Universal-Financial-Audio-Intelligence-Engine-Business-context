@@ -12,6 +12,8 @@ import re
 import tempfile
 from typing import Iterable
 
+from nlp.token_alignment import global_word_map
+
 import librosa
 import numpy as np
 import soundfile as sf
@@ -74,48 +76,98 @@ def _merge_intervals(intervals: Iterable[dict], gap_s: float = 0.06) -> list[dic
         prev["end"]=max(prev["end"], item["end"])
         prev["types"]=sorted(set(prev.get("types",[])) | set(item.get("types",[])))
         prev["confidence"]=round(max(float(prev.get("confidence",0)), float(item.get("confidence",0))),4)
+        pm=prev.get("alignment_method"); im=item.get("alignment_method")
+        if pm and im and pm != im:
+            prev["alignment_method"]="mixed"
+        elif not pm:
+            prev["alignment_method"]=im
+        pcs=[x for x in (prev.get("alignment_confidence"),item.get("alignment_confidence")) if isinstance(x,(int,float))]
+        if pcs:
+            prev["alignment_confidence"]=round(min(float(x) for x in pcs),4)
     return merged
 
 
 def spans_to_audio_intervals(asr: dict, pii: list[dict], profanity: list[dict], *, pad_s: float = 0.09) -> list[dict]:
-    """Map text spans to safe, padded audio intervals using ASR word timestamps."""
+    """Map sensitive entities to audio intervals, preferring owned Whisper tokens.
+
+    v4.5 entities are enriched with token_ids/time_start/time_end by the pipeline.  The
+    older character-span mapper remains only as a guarded fallback for unresolved cases.
+    """
     sensitive=[]
     for x in pii:
-        sensitive.append({"start":int(x["start"]),"end":int(x["end"]),"type":x.get("type","PII"),"confidence":float(x.get("confidence",0.0))})
+        sensitive.append({**x,"type":x.get("type","PII")})
     for x in profanity:
-        sensitive.append({"start":int(x["start"]),"end":int(x["end"]),"type":"PROFANITY","confidence":float(x.get("confidence",0.0))})
+        sensitive.append({**x,"type":"PROFANITY"})
     if not sensitive:
         return []
 
+    word_map=global_word_map(asr)
+    token_lookup={int(w["token_id"]):w for w in word_map}
     intervals=[]
-    for seg_global_start, seg_global_end, seg in _segment_offsets(asr.get("segments", [])):
-        seg_text=str(seg.get("text", ""))
-        words=seg.get("words", []) or []
-        word_spans=_word_char_spans(seg_text, words)
-        for entity in sensitive:
-            if entity["start"] >= seg_global_end or entity["end"] <= seg_global_start:
-                continue
-            local_start=max(0, entity["start"]-seg_global_start)
-            local_end=min(len(seg_text), entity["end"]-seg_global_start)
-            hits=[w for s,e,w in word_spans if s < local_end and local_start < e]
-            if hits:
-                start=min(float(w.get("start",seg.get("start",0.0))) for w in hits)
-                end=max(float(w.get("end",seg.get("end",start))) for w in hits)
-            else:
-                # Character-ratio fallback if word alignment fails.
-                seg_start=float(seg.get("start",0.0)); seg_end=float(seg.get("end",seg_start))
-                duration=max(0.0,seg_end-seg_start)
-                denom=max(1,len(seg_text))
-                start=seg_start + duration*(local_start/denom)
-                end=seg_start + duration*(local_end/denom)
-            intervals.append({
-                "start":max(0.0,start-pad_s),
-                "end":max(start,end+pad_s),
-                "types":[entity["type"]],
-                "confidence":round(entity["confidence"],4),
-            })
-    return _merge_intervals(intervals)
 
+    # Fast path: direct token/time ownership.
+    unresolved=[]
+    for entity in sensitive:
+        start=entity.get("time_start"); end=entity.get("time_end")
+        method=entity.get("alignment_method")
+        align_conf=float(entity.get("alignment_confidence",0.0) or 0.0)
+        if start is None or end is None:
+            tids=[int(x) for x in (entity.get("token_ids") or []) if int(x) in token_lookup]
+            if tids:
+                hits=[token_lookup[x] for x in tids]
+                start=min(x["time_start"] for x in hits); end=max(x["time_end"] for x in hits)
+                align_conf=sum(x["confidence"] for x in hits)/len(hits)
+                method="whisper_word_tokens"
+        if start is not None and end is not None and float(end)>=float(start):
+            # Low-confidence token boundaries receive a slightly larger privacy pad.
+            extra=0.06 if align_conf and align_conf < 0.72 else 0.0
+            pad=pad_s+extra
+            intervals.append({
+                "start":max(0.0,float(start)-pad),
+                "end":max(float(start),float(end)+pad),
+                "types":[entity["type"]],
+                "confidence":round(float(entity.get("confidence",0.0)),4),
+                "alignment_method":method or "whisper_word_tokens",
+                "alignment_confidence":round(align_conf,4),
+            })
+        else:
+            unresolved.append(entity)
+
+    # Guarded compatibility fallback. Character ratio is used only if token ownership
+    # genuinely failed, with extra padding to reduce leakage risk.
+    if unresolved:
+        for seg_global_start, seg_global_end, seg in _segment_offsets(asr.get("segments", [])):
+            seg_text=str(seg.get("text", ""))
+            words=seg.get("words", []) or []
+            word_spans=_word_char_spans(seg_text,words)
+            for entity in unresolved:
+                es=int(entity.get("start",0)); ee=int(entity.get("end",es))
+                if es >= seg_global_end or ee <= seg_global_start:
+                    continue
+                local_start=max(0,es-seg_global_start); local_end=min(len(seg_text),ee-seg_global_start)
+                hits=[w for cs,ce,w in word_spans if cs < local_end and local_start < ce]
+                if hits:
+                    start=min(float(w.get("start",seg.get("start",0.0))) for w in hits)
+                    end=max(float(w.get("end",seg.get("end",start))) for w in hits)
+                    method="late_word_alignment"
+                    align_conf=sum(float(w.get("confidence",0.0) or 0.0) for w in hits)/len(hits)
+                    pad=pad_s+0.04
+                else:
+                    seg_start=float(seg.get("start",0.0)); seg_end=float(seg.get("end",seg_start))
+                    duration=max(0.0,seg_end-seg_start); denom=max(1,len(seg_text))
+                    start=seg_start+duration*(local_start/denom)
+                    end=seg_start+duration*(local_end/denom)
+                    method="character_ratio_fallback"
+                    align_conf=0.0
+                    pad=pad_s+0.12
+                intervals.append({
+                    "start":max(0.0,start-pad),"end":max(start,end+pad),
+                    "types":[entity.get("type","PII")],
+                    "confidence":round(float(entity.get("confidence",0.0)),4),
+                    "alignment_method":method,
+                    "alignment_confidence":round(float(align_conf),4),
+                })
+    return _merge_intervals(intervals)
 
 def _apply_fade(mask: np.ndarray, sr: int, fade_ms: float = 8.0) -> np.ndarray:
     n=min(len(mask)//2, max(1,int(sr*fade_ms/1000.0)))
@@ -183,6 +235,8 @@ def create_protected_audio(
             "end":round(float(x["end"]),3),
             "types":x.get("types",[]),
             "confidence":x.get("confidence"),
+            "alignment_method":x.get("alignment_method"),
+            "alignment_confidence":x.get("alignment_confidence"),
         } for x in intervals],
         "duration_s":round(len(safe)/float(sr),3) if sr else 0.0,
         "sample_rate":int(sr),

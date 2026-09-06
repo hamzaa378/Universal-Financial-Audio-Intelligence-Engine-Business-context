@@ -58,7 +58,7 @@ if errorlevel 1 goto :fail
 
 :success
 echo.
-echo [PASS] v4.4 benchmark completed. Open the reports folder for JSON/CSV results.
+echo [PASS] v4.5 benchmark completed. Open the reports folder for JSON/CSV results.
 pause
 exit /b 0
 

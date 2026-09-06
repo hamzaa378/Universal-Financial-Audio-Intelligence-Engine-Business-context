@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 set "PY=%CD%\.venv\Scripts\python.exe"
 echo ============================================================
-echo Devsoc AI v4.4 GPU diagnostic
+echo Devsoc AI v4.5 GPU diagnostic
 echo ============================================================
 echo.
 nvidia-smi

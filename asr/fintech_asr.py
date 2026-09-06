@@ -23,7 +23,7 @@ def cuda_runtime_status() -> dict:
     """Report CTranslate2 GPU visibility and Windows DLL visibility.
 
     DLL visibility is diagnostic only. When CUDA is explicitly requested, the actual
-    CTranslate2 inference attempt is authoritative; v4.4 does not reject a working GPU
+    CTranslate2 inference attempt is authoritative; v4.5 does not reject a working GPU
     merely because an auxiliary DLL probe is imperfect.
     """
     if os.getenv("FINAI_FORCE_CPU", "0") == "1":
@@ -82,7 +82,7 @@ def _resolve_backend() -> tuple[str, str, dict]:
         compute = "float16" if compute_requested == "auto" else compute_requested
         return "cuda", compute, status
 
-    # auto mode may fall back to CPU. The normal v4.4 launcher does not use auto.
+    # auto mode may fall back to CPU. The normal v4.5 launcher does not use auto.
     if status.get("ready"):
         compute = "float16" if compute_requested == "auto" else compute_requested
         return "cuda", compute, status
@@ -166,7 +166,7 @@ def _gpu_error_message(exc: Exception, status: dict) -> str:
     return (
         f"GPU ASR failed: {type(exc).__name__}: {exc}. "
         f"CTranslate2 devices={status.get('device_count')}; {dll_text}. "
-        "v4.4 strict-GPU mode will not silently run this request on CPU."
+        "v4.5 strict-GPU mode will not silently run this request on CPU."
     )
 
 

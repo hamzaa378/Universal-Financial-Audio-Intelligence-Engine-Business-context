@@ -4,13 +4,14 @@ from pipeline import run_pipeline
 
 
 def main():
-    p=argparse.ArgumentParser(description="Universal Financial Audio Intelligence Engine v4.4")
+    p=argparse.ArgumentParser(description="Universal Financial Audio Intelligence Engine v4.5")
     p.add_argument("audio",help="Audio/video file")
     p.add_argument("--model",default=None,help="Whisper model, e.g. small, medium, large-v3")
     p.add_argument("--speed",choices=["fast","balanced","accuracy"],default="fast")
     p.add_argument("--output",default="result.json")
     p.add_argument("--privacy-profile",choices=["high_precision","balanced","high_recall"],default="balanced")
     p.add_argument("--semantic-ai",action="store_true",help="Enable batched FastEmbed semantic decisions")
+    p.add_argument("--ner-ai",action="store_true",help="Enable optional ONNX token NER second opinion")
     p.add_argument("--partial-mask",action="store_true")
     p.add_argument("--no-profanity-filter",action="store_true")
     p.add_argument("--no-financial-id-mask",action="store_true")
@@ -20,7 +21,7 @@ def main():
     a=p.parse_args()
     result=run_pipeline(
         a.audio,a.model,include_raw=a.include_raw,
-        privacy_profile=a.privacy_profile,use_semantic_ai=a.semantic_ai,
+        privacy_profile=a.privacy_profile,use_semantic_ai=a.semantic_ai,use_ner_ai=a.ner_ai,
         mask_mode="partial" if a.partial_mask else "full",
         profanity_enabled=not a.no_profanity_filter,
         financial_ids_enabled=not a.no_financial_id_mask,

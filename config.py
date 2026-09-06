@@ -33,11 +33,11 @@ class Settings:
         "EMI", "APR", "KYC", "e-KYC", "NPA", "NBFC", "RBI", "SEBI", "CIBIL",
         "foreclosure", "prepayment", "outstanding balance", "overdue", "principal",
         "interest rate", "late fee", "bounce charge", "loan account", "disbursement",
-        "moratorium", "Aadhaar", "PAN", "IFSC", "UPI", "VPA", "NEFT", "RTGS",
+        "moratorium", "Aadhaar", "PAN", "IFSC", "IFSC code", "bank IFSC", "UPI", "VPA", "NEFT", "RTGS",
         "IMPS", "beneficiary", "promise to pay", "PTP", "grievance", "collection",
         "settlement", "waiver", "repossession", "autodebit", "NACH", "e-mandate",
         "transaction reference", "loan ID", "customer ID", "passport", "voter ID",
-        "driving licence", "driving license"
+        "driving licence", "driving license", "account number", "bank account number", "OTP", "one time password", "CVV", "PIN code", "postal code", "date of birth"
     ])
 
 SETTINGS = Settings()

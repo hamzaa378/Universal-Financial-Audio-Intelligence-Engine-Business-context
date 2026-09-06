@@ -10,6 +10,7 @@ import streamlit as st
 from pipeline import run_pipeline, analyze_text
 from asr.fintech_asr import warmup_model, backend_status
 from decision_ai.warmup import warmup_semantic_ai
+from decision_ai.startup import verify_startup
 
 PII_TYPES=["EMAIL","PHONE","PAN","IFSC","UPI","CARD","AADHAAR","ACCOUNT_NUMBER","OTP","CVV","PINCODE","DOB","NAME","ADDRESS","PASSPORT","VOTER_ID","DRIVING_LICENSE"]
 
@@ -24,6 +25,10 @@ with st.sidebar:
     semantic_ai=st.toggle(
         "Semantic AI second opinion", value=True,
         help="Uses lightweight semantic AI only for ambiguous PII/intent decisions. Falls back to deterministic rules if unavailable.",
+    )
+    ner_ai=st.toggle(
+        "Token NER second opinion (optional)", value=False,
+        help="Optional ONNX token-classification model for ambiguous NAME/ADDRESS/PHONE/account contexts. Install with install_ner_ai.bat.",
     )
     full_mask=st.toggle("Full PII redaction", value=True, help="Recommended. Partial mode can reveal identifier suffixes.")
     profanity_enabled=st.toggle("Reduce profanity", value=True)
@@ -45,20 +50,26 @@ with st.sidebar:
     )
     asr_speed_mode={"Fast demo":"fast","Balanced":"balanced","Maximum accuracy":"accuracy"}[speed_label]
 
-    if st.button("Warm up AI models", width="stretch"):
-        with st.spinner("Warming GPU ASR and semantic prototype cache..."):
+    if st.button("Warm up & verify AI", width="stretch"):
+        with st.spinner("Verifying GPU ASR, semantic judge, optional NER and diarization... "):
             try:
-                warm = warmup_model(whisper_model, smoke_test=True)
-                st.success(f"ASR ready on {warm['device'].upper()} ({warm['compute_type']})")
-                if semantic_ai:
-                    sem=warmup_semantic_ai()
-                    if sem.get("available"):
-                        st.success(f"Semantic AI ready via {sem.get('provider') or sem.get('backend')} — {sem.get('warmed_vectors',0)} cached vectors")
-                    else:
-                        st.warning("Semantic AI unavailable; deterministic privacy remains active.")
-                        if sem.get("error"): st.caption(sem["error"])
+                report=verify_startup(whisper_model,semantic=semantic_ai,ner=ner_ai,asr_smoke=True)
+                st.session_state["startup_report"]=report
+                a=report.get("asr_gpu",{})
+                if a.get("ready"):
+                    st.success(f"ASR GPU = {str(a.get('device')).upper()} {a.get('compute_type')} ✓")
+                else:
+                    st.error("ASR GPU is not ready: "+str(a.get("error")))
+                sem=report.get("semantic_ai",{})
+                st.caption("Semantic AI = "+((str(sem.get("provider") or sem.get("backend"))+" ✓") if sem.get("ready") else "disabled/unavailable"))
+                judge=report.get("privacy_judge",{})
+                st.caption("Privacy Judge = "+("ready ✓" if judge.get("ready") else str(judge.get("state","fallback"))))
+                ner=report.get("ner_ai",{})
+                st.caption("NER AI = "+((str(ner.get("provider") or ner.get("backend"))+" ✓") if ner.get("ready") else "disabled/unavailable"))
+                dia=report.get("diarization",{})
+                st.caption("Diarization = "+("available ✓" if dia.get("available") else "available/disabled" if dia.get("installed") else "not installed"))
             except Exception as exc:
-                st.error(f"AI warm-up failed: {exc}")
+                st.error(f"AI verification failed: {exc}")
 
     bstat=backend_status()
     if bstat.get("error"):
@@ -80,6 +91,7 @@ def options():
     return dict(
         privacy_profile=profile,
         use_semantic_ai=semantic_ai,
+        use_ner_ai=ner_ai,
         mask_mode="full" if full_mask else "partial",
         mask_types=mask_types,
         profanity_enabled=profanity_enabled,
@@ -128,6 +140,13 @@ def show_analysis(a: dict):
             st.warning("Semantic AI requested but unavailable; deterministic fallback is active. Install requirements-ai-lite.txt and run once with internet access to cache the model.")
             if ai.get("error"):
                 st.caption(ai["error"])
+    nai=a.get("ner_ai",{})
+    if ner_ai:
+        if nai.get("available"):
+            st.success(f"Token NER active via {nai.get('provider') or nai.get('backend')}")
+        else:
+            st.warning("NER AI requested but unavailable; contextual rules + semantic judge remain active. Run install_ner_ai.bat to enable it.")
+            if nai.get("error"): st.caption(nai["error"])
 
 
 def _analysis_view(r: dict) -> dict:
@@ -147,6 +166,7 @@ def _analysis_view(r: dict) -> dict:
         "pii_mean_confidence":r["confidence"].get("pii_mean",1.0),
         "timing_ms":{"total":r["performance"].get("privacy_and_nlp",0)},
         "semantic_ai":r["privacy"].get("semantic_ai",{}),
+        "ner_ai":r["privacy"].get("ner_ai",{}),
     }
 
 

@@ -1,4 +1,4 @@
-DEVSOC AI v4.4 GPU QUICK START
+DEVSOC AI v4.5 GPU QUICK START
 ==============================
 
 1. Open a NEW Command Prompt after changing CUDA/cuDNN PATH.

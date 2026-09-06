@@ -7,7 +7,7 @@ from ingest.audio_loader import load_audio
 from ingest.tamper_detection import detect_tamper
 from asr.fintech_asr import transcribe
 from nlp.language import annotate_segment_languages
-from nlp.pii import public_pii_metadata, semantic_status, mask_pii
+from nlp.pii import public_pii_metadata, semantic_status, ner_status, mask_pii
 from nlp.profanity import public_profanity_metadata
 from nlp.sensitive_financial import public_sensitive_id_metadata
 from nlp.privacy import protect_text
@@ -19,6 +19,7 @@ from analysis_ai.acoustic import analyze_acoustics
 from analysis_ai.diarization import diarize, assign_speakers
 from decision_ai.utterance_ai import analyze_utterance
 from audio_privacy import create_protected_audio
+from nlp.token_alignment import attach_entity_tokens
 
 
 def _trust(asr_conf, quality, intent_conf, pii_conf=1.0):
@@ -37,10 +38,11 @@ def _safe_financial_entities(entities: list[dict], include_raw: bool=False) -> l
     return out
 
 
-def _policy_kwargs(privacy_profile,use_semantic_ai,mask_mode,mask_types,profanity_enabled,financial_ids_enabled):
+def _policy_kwargs(privacy_profile,use_semantic_ai,use_ner_ai,mask_mode,mask_types,profanity_enabled,financial_ids_enabled):
     return dict(
         privacy_profile=privacy_profile,
         use_semantic=use_semantic_ai,
+        use_ner=use_ner_ai,
         pii_mode=mask_mode,
         mask_types=set(mask_types) if mask_types else None,
         profanity_enabled=profanity_enabled,
@@ -69,6 +71,7 @@ def _safe_transcription(asr: dict, safe_text: str, internal_privacy: dict, *, ma
         "segments":[],"words":[],
     }
     cursor=0
+    global_token=0
     segments=asr.get("segments",[])
     for seg_i,seg in enumerate(segments):
         seg_text=str(seg.get("text",""))
@@ -99,14 +102,17 @@ def _safe_transcription(asr: dict, safe_text: str, internal_privacy: dict, *, ma
 
         item={k:deepcopy(v) for k,v in seg.items() if k!="words"}
         item["text"]=safe_seg
-        item["words"]=[
-            {"token_index":i,"start":w.get("start"),"end":w.get("end"),"confidence":w.get("confidence")}
-            for i,w in enumerate(seg.get("words",[]))
-        ]
+        item["words"]=[]
+        for local_i,w in enumerate(seg.get("words",[])):
+            item["words"].append({
+                "token_id":global_token,"segment_token_index":local_i,
+                "start":w.get("start"),"end":w.get("end"),"confidence":w.get("confidence")
+            })
+            global_token+=1
         out["segments"].append(item)
         cursor=ge+(1 if seg_i < len(segments)-1 else 0)
     out["words"]=[
-        {"token_index":i,"start":w.get("start"),"end":w.get("end"),"confidence":w.get("confidence")}
+        {"token_id":i,"start":w.get("start"),"end":w.get("end"),"confidence":w.get("confidence")}
         for i,w in enumerate(asr.get("words",[]))
     ]
     return out
@@ -116,6 +122,7 @@ def analyze_text(
     *,
     privacy_profile: str="balanced",
     use_semantic_ai: bool=False,
+    use_ner_ai: bool=False,
     mask_mode: str="full",
     mask_types=None,
     profanity_enabled: bool=True,
@@ -129,7 +136,7 @@ def analyze_text(
     """
     t0=time.perf_counter()
     policy=_policy_kwargs(
-        privacy_profile,use_semantic_ai,mask_mode,mask_types,profanity_enabled,financial_ids_enabled
+        privacy_profile,use_semantic_ai,use_ner_ai,mask_mode,mask_types,profanity_enabled,financial_ids_enabled
     )
     protected=protect_text(text,**policy)
     t_priv=time.perf_counter()
@@ -166,6 +173,7 @@ def analyze_text(
         "pii_mean_confidence":round(pii_conf,4),
         "privacy_profile":privacy_profile,
         "semantic_ai":semantic_status() if use_semantic_ai else {"available":False,"backend":"disabled","model":None,"provider":None,"error":None},
+        "ner_ai":ner_status() if use_ner_ai else {"available":False,"backend":"disabled","provider":None,"error":None},
         "timing_ms":{
             "privacy":round((t_priv-t0)*1000,4),
             "understanding":round((t_end-t_priv)*1000,4),
@@ -184,6 +192,7 @@ def run_pipeline(
     *,
     privacy_profile="balanced",
     use_semantic_ai=False,
+    use_ner_ai=False,
     mask_mode="full",
     mask_types=None,
     profanity_enabled=True,
@@ -222,6 +231,7 @@ def run_pipeline(
         text,
         privacy_profile=privacy_profile,
         use_semantic_ai=use_semantic_ai,
+        use_ner_ai=use_ner_ai,
         mask_mode=mask_mode,
         mask_types=mask_types,
         profanity_enabled=profanity_enabled,
@@ -229,6 +239,11 @@ def run_pipeline(
         include_internal=True,
     )
     internal_privacy=text_analysis.pop("_internal_privacy")
+    # v4.5: bind accepted entities to Whisper token IDs/timestamps before audio masking.
+    internal_privacy["pii"]=attach_entity_tokens(asr,list(internal_privacy.get("pii",[])))
+    internal_privacy["financial_ids"]=attach_entity_tokens(asr,list(internal_privacy.get("financial_ids",[])))
+    internal_privacy["profanity"]=attach_entity_tokens(asr,list(internal_privacy.get("profanity",[])))
+    text_analysis["pii"]=public_pii_metadata(internal_privacy["pii"])
     timing["privacy_and_nlp"]=(time.perf_counter()-t)*1000
 
     protected_audio=None
@@ -269,6 +284,7 @@ def run_pipeline(
             "mask_mode":mask_mode,
             "financial_ids_enabled":financial_ids_enabled,
             "semantic_ai":text_analysis["semantic_ai"],
+            "ner_ai":text_analysis.get("ner_ai",{}),
             "raw_transcript_included":bool(include_raw),
         },
         "confidence":{

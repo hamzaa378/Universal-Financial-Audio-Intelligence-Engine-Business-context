@@ -1,170 +1,152 @@
-# Universal Financial Audio Intelligence Engine — v4.4 GPU-First
+# Universal Financial Audio Intelligence Engine — v4.5 Privacy-First GPU Hybrid
 
-v4.4 is a Windows-focused financial-call intelligence prototype with strict GPU ASR, hybrid PII/privacy decisions, protected-audio generation, financial entity extraction, promise-to-pay detection, regulatory phrase screening, and a Streamlit review UI.
+v4.5 keeps strict CUDA/FP16 Faster-Whisper from v4.4 and hardens the privacy path around the failure modes that matter most in real calls: ASR punctuation/format variation, spoken identifiers, name/address overcapture, and character-to-audio alignment.
 
-## Main architecture
-
-```text
-Upload / microphone
-   -> one audio decode (16 kHz mono)
-   -> shared acoustic quality/stress analysis
-   -> Faster-Whisper on CUDA FP16
-   -> time-aligned words + confidence
-   -> PII candidates + strong validators
-        -> ambiguous candidates -> batched semantic AI
-   -> sensitive financial-ID detector
-   -> profanity detector
-   -> financial entity / intent / obligation / compliance layer
-   -> protected transcript
-   -> word-time aligned protected audio (beep or mute)
-   -> Streamlit review UI + benchmark reports
-```
-
-## Strict GPU behavior
-
-Normal startup uses:
+## Processing architecture
 
 ```text
-FINAI_DEVICE=cuda
-FINAI_COMPUTE_TYPE=float16
-FINAI_STRICT_GPU=1
+Audio / microphone
+  -> one 16 kHz decode
+  -> shared signal analysis
+  -> Faster-Whisper CUDA FP16
+  -> word IDs + timestamps + confidence
+  -> ASR-aware normalization
+       - spoken digits
+       - multi-level spoken email
+       - separator-normalized IFSC
+       - natural-language dates
+  -> deterministic privacy candidates / validators
+  -> optional token NER support for ambiguous clauses
+  -> optional semantic privacy judge
+  -> conflict resolver
+  -> token-owned PII/profanity entities
+  -> protected transcript + token-time audio redaction
+  -> financial entities / intent / obligations / regulatory screening
+  -> Streamlit review UI
 ```
 
-If CUDA inference fails, v4.4 reports the error and stops that request. It does **not** silently re-run Faster-Whisper on CPU. Use `run_frontend_cpu.bat` only when you intentionally want CPU troubleshooting.
+## IFSC robustness
 
-## Install
+All of these are recognized when appropriate:
+
+```text
+ABCD0123456
+ABCD-0123456
+ABCD 0123456
+ABCD_0123456
+My IFSC is ABCD zero one two three four five six
+```
+
+The separator/spoken forms are context-gated so a generic reference such as `Reference ABCD-0123456` is not automatically hidden in Balanced mode.
+
+## Install and GPU verification
+
+Run:
 
 ```bat
 install_v4.bat
-```
-
-Core install includes Faster-Whisper, audio processing, Streamlit, and CPU FastEmbed semantic AI. Optional heavier diarization is in `requirements-ai.txt`.
-
-Optional semantic-AI GPU acceleration:
-
-```bat
-install_semantic_gpu.bat
-```
-
-## Verify GPU
-
-Open a new Command Prompt after changing PATH and check:
-
-```bat
-where cublas64_12.dll
-where cublasLt64_12.dll
-where cudnn64_9.dll
-```
-
-Then:
-
-```bat
-diagnose_gpu.bat
-gpu_smoke_test.bat
-```
-
-## Start frontend
-
-```bat
 run_frontend.bat
 ```
 
-Open `http://localhost:8501` and click **Warm up AI models** once before the first call.
+The strict GPU launcher now performs a real tiny Faster-Whisper CUDA inference before Streamlit starts. It requires:
 
-Recommended RTX 4060 demo setup:
+```text
+cublas64_12.dll
+cublasLt64_12.dll
+cudnn64_9.dll
+CTranslate2 CUDA device > 0
+actual Whisper CUDA/FP16 smoke inference = PASS
+```
 
-- Whisper: `small` + `Fast demo` for lowest latency
-- Whisper: `medium` + `Balanced` for stronger accuracy
-- Detection: `Balanced hybrid`
-- Semantic AI: ON after warm-up
-- Full PII redaction: ON
-- Sensitive financial IDs: ON
-- Profanity reduction: ON
-- Protected audio: Bleep tone
-- Speaker diarization: OFF unless pyannote + HF token are configured
+There is no silent CPU fallback in `run_frontend.bat`. CPU troubleshooting remains available through `run_frontend_cpu.bat`.
 
-## Privacy categories
+For a full component report run:
 
-PII:
-- Email
-- Phone
-- PAN
-- IFSC
-- UPI/VPA
-- Card number (Luhn validated)
-- Aadhaar (checksum/context aware)
-- Bank account number
-- OTP
-- CVV
-- PIN code
-- Date of birth
-- Name (explicit context)
-- Address (explicit/contextual)
-- Passport
-- Voter ID / EPIC
-- Driving licence/license
+```bat
+verify_components.bat
+```
 
-Sensitive financial identifiers are tracked separately:
-- Transaction/reference ID
-- Loan ID
-- Customer ID
-- Application ID
-- Complaint/grievance/case ID
+The report separates:
 
-## Financial understanding
+```text
+ASR GPU
+Semantic AI
+Privacy Judge
+Token NER AI
+Diarization
+```
 
-The current layer extracts or screens:
-- EMI amount
-- Outstanding amount
-- Due amount
-- Loan/principal amount
-- Settlement amount
-- Late fee / bounce charge
-- Interest rate / APR
-- Tenure
-- Due/payment date expressions
-- Payment method
-- Payment status
-- Promise-to-pay
-- Repayment difficulty
-- Payment refusal
-- Payment/debt dispute
-- Complaint/fraud/verification/foreclosure/settlement intents
-- Abuse/profanity markers
-- Regulatory risk phrases and selected disclosures
-- Acoustic stress markers
-- Optional speaker diarization
+## Optional token NER AI
 
-## Efficiency changes in v4.4
+The core program does not require a large token-classification model. To add the optional ONNX second opinion:
 
-- ASR receives the already-decoded waveform instead of decoding the file again.
-- Call-quality and stress-marker features share one acoustic feature pass.
-- Audio masking can reuse the loaded waveform.
-- Semantic AI batches all missing prototype embeddings and caches them.
-- Intent + abusive tone share one semantic inference batch.
-- Ambiguous PII candidates share one semantic privacy-judge batch.
-- Pyannote pipeline is cached when diarization is enabled.
-- UI reports ASR time, text-AI time, total time, and real-time factor (RTF).
+```bat
+install_ner_ai.bat
+```
 
-## Benchmarks
+Then enable **Token NER second opinion** in the frontend and click **Warm up & verify AI**.
+
+The bundled default ONNX model is supporting evidence only; deterministic validators remain authoritative for PAN, IFSC, Luhn-valid cards, Aadhaar checks/context, and other strong structures. The default model is not treated as a Hindi/Hinglish production NER model.
+
+## v4.5 privacy improvements
+
+- IFSC separator normalization with false-positive guardrails.
+- Spoken IFSC recognition for digit-by-digit branch codes.
+- Spoken-number normalization for phone/Aadhaar/card/account/OTP/CVV/PIN contexts.
+- Multi-level spoken email reconstruction such as `name dot x at bank dot co dot in`.
+- Natural-language DOB patterns such as `12 March 1998`, only under DOB/birth context.
+- Token-bounded NAME extraction so `My name is John Doe and my account...` masks only `John Doe`.
+- Clause-bounded ADDRESS extraction so the mask stops before the next phone/email/account field.
+- Optional ONNX token-NER support only for ambiguous contextual candidates.
+- Batched semantic privacy decisions retained from v4.4.
+- PII/profanity/financial-ID entities are attached to Whisper token IDs/timestamps before audio masking.
+- Audio redaction prefers direct token timing; character-ratio timing is now a padded fallback only.
+
+## Recommended frontend settings
+
+For RTX 4060 demo work:
+
+```text
+Detection profile       Balanced hybrid
+Semantic AI             ON
+Token NER               OFF initially, then ON after install_ner_ai.bat
+Full PII redaction      ON
+Sensitive financial IDs ON
+Profanity reduction     ON
+Whisper                 small + Fast demo while debugging
+                         medium + Balanced for stronger accuracy
+Protected audio         Bleep tone
+Diarization             OFF unless needed
+```
+
+## Regression benchmark
 
 ```bat
 run_privacy_benchmark.bat
 ```
 
-It runs:
-1. unit tests,
-2. PII/profanity precision-recall-FPR regression,
-3. sensitive-financial-ID regression,
-4. optional semantic-AI stress test,
-5. optional full GPU audio benchmark.
+The bundled synthetic regression suite is for development regression only. It is not a production-accuracy claim.
 
-Audio folder example:
+## Real audio manifest benchmark
+
+Use `benchmarks\audio_manifest_example.jsonl` as the schema, then run:
 
 ```bat
-run_privacy_benchmark.bat "C:\path\to\test_audio" small
+run_audio_manifest_benchmark.bat "C:\path\to\manifest.jsonl" small
 ```
 
-Reports are written under `reports\`.
+It reports per sample:
 
-The bundled test data is synthetic regression data. Do not present its scores as real-world production accuracy. For a defensible evaluation, add consented/labeled or carefully generated noisy financial calls and report WER/CER, PII precision/recall/F1, negative-case FPR, profanity F1, intent/entity F1, diarization error rate, and end-to-end RTF.
+- WER,
+- PII precision/recall/F1,
+- profanity precision/recall/F1,
+- token-alignment coverage,
+- optional gold audio-redaction coverage,
+- ASR time,
+- text-AI time,
+- total RTF,
+- ASR CUDA/compute type,
+- semantic provider,
+- NER provider.
+
+Use consented or synthetic labeled audio for real evaluation claims.

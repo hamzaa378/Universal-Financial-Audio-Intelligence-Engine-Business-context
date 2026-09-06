@@ -1,15 +1,15 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
-title Devsoc AI v4.4 Installer
+title Devsoc AI v4.5 Installer
 
 set "LOG=%CD%\install_v4.log"
->"%LOG%" echo Devsoc AI v4.4 installation log
+>"%LOG%" echo Devsoc AI v4.5 installation log
 >>"%LOG%" echo Started: %DATE% %TIME%
 >>"%LOG%" echo Folder: %CD%
 
 echo ============================================================
-echo   Devsoc AI v4.4 - Safe Windows Installer
+echo   Devsoc AI v4.5 - Safe Windows Installer
 echo ============================================================
 echo.
 echo Project folder:
@@ -196,6 +196,9 @@ echo ============================================================
 echo.
 echo Start the frontend with:
 echo   run_frontend.bat
+echo.
+echo Optional token NER AI can be installed later with:
+echo   install_ner_ai.bat
 echo.
 echo This launcher is STRICT GPU for Faster-Whisper.
 echo Use run_frontend_cpu.bat only when you intentionally want CPU ASR.

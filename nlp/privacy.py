@@ -19,12 +19,13 @@ def protect_text(
     *,
     privacy_profile: str = "balanced",
     use_semantic: bool = False,
+    use_ner: bool = False,
     mask_types: set[str] | None = None,
     profanity_enabled: bool = True,
     financial_ids_enabled: bool = True,
 ) -> dict:
     threshold=PROFILE_THRESHOLDS.get(privacy_profile,PROFILE_THRESHOLDS["balanced"])
-    pii=detect_pii(text,min_confidence=threshold,use_semantic=use_semantic)
+    pii=detect_pii(text,min_confidence=threshold,use_semantic=use_semantic,use_ner=use_ner)
     if mask_types is not None:
         pii=[x for x in pii if x["type"] in mask_types]
     financial_ids=detect_sensitive_financial_ids(text) if financial_ids_enabled else []

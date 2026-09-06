@@ -1,0 +1,1 @@
+{"id":"sample_001","audio":"audio/sample_001.wav","transcript":"My IFSC code is ABCD-0123456.","pii":[{"type":"IFSC","value":"ABCD-0123456"}],"profanity":[],"gold_intervals":[{"type":"IFSC","start":1.0,"end":2.0}]}
