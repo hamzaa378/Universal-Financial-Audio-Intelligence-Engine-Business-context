@@ -1,6 +1,6 @@
-# Universal Financial Audio Intelligence Engine — v4.8 Precision-Guard Privacy Hybrid
+# Universal Financial Audio Intelligence Engine — v4.9 ASR-Robust Privacy Hybrid
 
-v4.8 keeps the v4.7 context-recall architecture and adds three focused precision controls: a public-geography veto for standalone PIN codes, stricter ADDRESS end boundaries at new field labels, and ownership-gated protection of partial card/account identifiers such as the last four digits. The goal is to improve masking accuracy without reopening broad numeric false positives.
+v4.9 keeps the v4.7/v4.8 occurrence-aware architecture and adds an ASR-robust privacy layer: ownership-gated raw-span fallback for damaged values, mixed spoken/written email and UPI normalization, mixed NATO/digit alphanumeric decoding, conservative fuzzy driving-licence state handling, stronger explanation/public-role vetoes, and broader natural ownership phrases. Strict validation remains the default path; the fallback hides only strongly owned source spans and never invents missing private characters.
 
 ## Processing architecture
 
@@ -20,6 +20,7 @@ Audio / microphone
        - natural-language dates
   -> field-aware clause segmentation
   -> deterministic privacy candidates / validators
+  -> ownership-gated raw-span fallback for ASR-damaged values
   -> occurrence-specific ownership + role context
   -> one-sentence expected-field state for owned follow-up answers
   -> example/document/reference veto
@@ -32,6 +33,18 @@ Audio / microphone
   -> Streamlit review UI
 ```
 
+
+## v4.9 ASR-robust improvements
+
+- Strong personal ownership can mask a bounded raw span even when ASR corruption breaks strict validation; the system never guesses the missing value.
+- Mixed forms such as `arove.private at mail.co.in` and `rf.con at OKSBI` are normalized under email/UPI ownership.
+- PAN/passport/IFSC-style dictation can mix NATO words with written numeric chunks.
+- Indian driving-licence state names tolerate conservative ASR spelling errors only under DL context and structural validation.
+- Explanatory language such as `may contain`, `usually contains`, `identifies a`, and `has a structured format` receives a stronger context veto.
+- Public/customer-support helplines are suppressed as personal-phone candidates.
+- Broader ownership phrases cover preferred/account names, best contact numbers, SMS/contact wording, email/payment instructions, mailing addresses and `you can find me at ...`.
+
+See `V4_9_CHANGES.md` for implementation details and `LIMITATIONS_V4_9.md` for remaining risks and remedies.
 
 ## v4.8 precision-guard improvements
 
@@ -65,7 +78,7 @@ See `V4_8_CHANGES.md` for implementation details and `LIMITATIONS_V4_8.md` for k
 - NATO/phonetic-alphabet PAN and IFSC dictation is normalized under explicit PAN/IFSC context.
 - Transaction/ticket/complaint/customer/application identifiers are still available, but their separate operational-ID layer is disabled by default to reduce false positives.
 
-See `V4_8_CHANGES.md` for the focused precision changes, `V4_7_CHANGES.md` for the recall architecture, and `V4_6_CHANGES.md` for the occurrence-aware precision-layer rationale.
+See `V4_9_CHANGES.md` for the ASR-robust layer, `V4_8_CHANGES.md` for the focused precision changes, `V4_7_CHANGES.md` for the recall architecture, and `V4_6_CHANGES.md` for the occurrence-aware precision-layer rationale.
 
 ## IFSC robustness
 
@@ -167,7 +180,7 @@ Diarization             OFF unless needed
 run_privacy_benchmark.bat
 ```
 
-The bundled synthetic regression suites are for development regression only. They are not production-accuracy claims. v4.8 retains the v4.6/v4.7 suites and adds `benchmarks\precision_guard_v48.jsonl` for public-vs-personal PIN codes, ADDRESS field boundaries, and ownership-gated card/account last-four masking.
+The bundled synthetic regression suites are for development regression only. They are not production-accuracy claims. v4.9 retains all prior suites and adds `benchmarks\asr_robust_v49.jsonl` for ASR-corrupted owned values, mixed spoken/written email/UPI, public-line suppression, explanation vetoes, and broader ownership language.
 
 ## Real audio manifest benchmark
 

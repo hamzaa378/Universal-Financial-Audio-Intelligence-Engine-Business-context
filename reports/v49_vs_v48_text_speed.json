@@ -1,0 +1,23 @@
+{
+  "environment_note": "Same container, bundled synthetic text suite, 20 iterations; detector + text privacy pipeline only.",
+  "v48": {
+    "evaluations": 2400,
+    "total_seconds": 0.32953837500008376,
+    "cases_per_second": 7282.915077794475,
+    "mean_ms": 0.137054007917925,
+    "p50_ms": 0.12492899998051143,
+    "p95_ms": 0.23441399991952494,
+    "p99_ms": 0.36850599997251265
+  },
+  "v49": {
+    "evaluations": 2400,
+    "total_seconds": 0.6312554670000736,
+    "cases_per_second": 3801.94727089741,
+    "mean_ms": 0.2627108108327055,
+    "p50_ms": 0.15948099996876408,
+    "p95_ms": 0.6798969999408655,
+    "p99_ms": 0.8816120000574301
+  },
+  "mean_ms_ratio": 1.9168415052118013,
+  "mean_ms_delta": 0.12565680291478049
+}

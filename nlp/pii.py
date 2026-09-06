@@ -1,4 +1,4 @@
-"""Privacy-first PII detection for financial-call transcripts (v4.8).
+"""Privacy-first PII detection for financial-call transcripts (v4.9).
 
 Pipeline:
 ASR text -> ASR-aware normalization candidates -> deterministic validators -> optional
@@ -18,6 +18,7 @@ from nlp.normalization import (
     find_ifsc_candidates,
     find_spoken_email_candidates,
     find_spoken_handle_candidates,
+    find_mixed_at_candidates,
     find_spoken_digit_runs,
     find_spoken_alnum_runs,
     find_natural_date_candidates,
@@ -117,10 +118,13 @@ UPI_HANDLES = {
 PHONE_NEGATIVE_CONTEXT = re.compile(
     r"(?i)\b(?:order|transaction|txn|reference|ref|loan|customer|application|invoice|ticket|case|employee|tracking|token|request|complaint)\s*(?:id|number|no\.?|#)?(?:\s+is)?\s*[:=-]?\s*$"
 )
+PUBLIC_PHONE_CONTEXT = re.compile(
+    r"(?i)\b(?:customer\s+(?:support|care)\s+)?(?:helpline|hotline|support\s+line|customer\s+care\s+number|switchboard|office\s+number|public\s+contact)\s*(?:number)?\s*(?:is|:|=)?\s*$"
+)
 PHONE_POSITIVE_CONTEXT = re.compile(
-    r"(?i)\b(?:phone|mobile|contact|whatsapp|telephone|number\s+to\s+reach|"
+    r"(?i)\b(?:phone|mobile|contact|whatsapp|telephone|cell(?:phone)?|number\s+to\s+reach|number\s+you\s+can\s+call|"
     r"call(?:\s+(?:me|him|her|them|[A-Z][A-Za-z.'-]*))?|"
-    r"reach(?:\s+(?:me|him|her|them|[A-Z][A-Za-z.'-]*))?|ring\s+me|"
+    r"reach(?:\s+(?:me|him|her|them|[A-Z][A-Za-z.'-]*))?|ring\s+me|text\s+me|message\s+me|sms\s+me|contact\s+me|best\s+number\s+to\s+reach\s+me|preferred\s+contact\s+number|"
     r"(?:my|your|his|her|their|customer'?s|client'?s|borrower'?s)\s+(?:phone\s+|mobile\s+|contact\s+)?number)\b"
 )
 PHONE_FOLLOWING_CONTEXT = re.compile(r"(?i)\b(?:for\s+(?:future\s+)?contact|for\s+contact|as\s+(?:my|his|her|their)\s+(?:phone|mobile|contact)\s+number)\b")
@@ -136,7 +140,9 @@ AADHAAR_CONTEXT = re.compile(r"(?i)\b(?:aadhaar|aadhar|uidai|uid\s+number)\b")
 CARD_CONTEXT = re.compile(r"(?i)\b(?:card|credit\s+card|debit\s+card|visa|mastercard|rupay)\b")
 UPI_CONTEXT = re.compile(r"(?i)\b(?:upi|vpa|virtual\s+payment\s+address|pay\s+id)\b")
 IFSC_CONTEXT = re.compile(r"(?i)\b(?:ifsc|bank\s+ifsc|branch\s+ifsc)(?:\s+code)?\b")
-EMAIL_CONTEXT = re.compile(r"(?i)\b(?:email|e-mail|mail\s+id|email\s+address|registered\s+mail)\b")
+EMAIL_CONTEXT = re.compile(r"(?i)\b(?:email|e-mail|mail\s+id|email\s+address|registered\s+mail|alternate\s+email|secondary\s+email|work\s+email|personal\s+email)\b")
+EMAIL_DELIVERY_CONTEXT = re.compile(r"(?i)\b(?:email\s+me|mail\s+me|send\s+(?:the\s+)?(?:receipt|confirmation|statement|invoice|details|copy|document)\s+to(?:\s+me)?|send\s+it\s+to(?:\s+me)?)\b")
+UPI_PAYMENT_CONTEXT = re.compile(r"(?i)\b(?:pay\s+me|send\s+(?:the\s+)?(?:money|payment|refund)\s+to|transfer\s+(?:the\s+)?(?:money|amount|refund)\s+to)\b")
 PAN_CONTEXT = re.compile(r"(?i)\b(?:pan|permanent\s+account\s+number)(?:\s+(?:number|no\.?|card))?\b")
 
 # Public/geographic postal-code language. A six-digit PIN is not inherently personal:
@@ -161,6 +167,18 @@ _EXAMPLE_CONTEXT = re.compile(
     r"unit[- ]?test|synthetic\s+benchmark|dataset\s+(?:column|example)|training\s+video|"
     r"demonstrat(?:e|es|ed|ion))\b"
 )
+
+# Explanatory/definition language survives even when ASR removes punctuation. It is a
+# stronger negative signal than a type keyword alone, but explicit personal assignment
+# in the same local role can still override it.
+_EXPLANATION_CONTEXT = re.compile(
+    r"(?i)\b(?:may\s+(?:also\s+)?contain|can\s+(?:also\s+)?contain|usually\s+contains?|"
+    r"typically\s+contains?|generally\s+contains?|consists?\s+of|is\s+an?\s+(?:temporary|alphanumeric|numeric|structured|personal|bank)|"
+    r"identifies?\s+(?:a|an|the)|is\s+(?:printed|located|shown)\s+on|has\s+(?:a\s+)?structured\s+format|"
+    r"format\s+(?:contains?|includes?)|is\s+used\s+to\s+(?:identify|verify|authenticate)|"
+    r"example\s+of|used\s+as\s+(?:an?\s+)?example|should\s+contain|must\s+contain)\b"
+)
+
 _REFERENCE_ROLE_CONTEXT = re.compile(
     r"(?i)\b(?:product\s+serial|serial\s+number|asset\s+code|batch(?:\s+code)?|invoice\s+(?:reference|number)|"
     r"shipment\s+(?:reference|number)|reference\s+document|document\s+template|page\s+(?:identifier|number)|"
@@ -301,14 +319,15 @@ def _apply_occurrence_context_policy(text: str, items: list[dict]) -> list[dict]
         clause=_occurrence_context(text,item["start"],item["end"],170)
         explicit=_explicit_owner_for_type(kind,left)
         hard_example=bool(_EXAMPLE_CONTEXT.search(clause))
+        explanatory=bool(_EXPLANATION_CONTEXT.search(clause))
         role_reference=bool(_REFERENCE_ROLE_CONTEXT.search(left))
         public_geo=kind=="PINCODE" and bool(_PUBLIC_GEO_CONTEXT.search(clause))
 
         if kind not in {"PASSWORD","USERNAME","API_KEY","AUTH_TOKEN"}:
-            if hard_example and not explicit:
+            if (hard_example or explanatory) and not explicit:
                 item["confidence"]=min(float(item["confidence"]),0.25)
                 item["decision_method"]="context_veto"
-                item["evidence"]=item.get("evidence","")+"+example_veto"
+                item["evidence"]=item.get("evidence","")+("+example_veto" if hard_example else "+explanation_veto")
                 item.pop("ai_review",None)
                 item.pop("ner_review",None)
             elif public_geo and not explicit:
@@ -372,11 +391,13 @@ def _resolve_conflicts(items: Iterable[dict]) -> list[dict]:
 
 # ---------- bounded NAME / ADDRESS / SECRET extraction ----------
 _NAME_LABEL = re.compile(
-    r"(?i)\b(?:my\s+(?:full\s+|registered\s+|legal\s+|official\s+)?name\s+is|"
-    r"(?:customer|applicant|borrower)\s+name\s+is|name\s*[:=])\s+"
+    r"(?i)\b(?:my\s+(?:full\s+|registered\s+|legal\s+|official\s+|preferred\s+)?name\s+(?:is|would\s+be)|"
+    r"(?:customer|applicant|borrower|beneficiary|account\s+holder|cardholder)\s+name\s+is|"
+    r"name\s+on\s+(?:my\s+)?(?:account|card|passport)\s+is|i\s+go\s+by|i\s+prefer\s+to\s+be\s+called|please\s+(?:call|address)\s+me\s+as|people\s+call\s+me|you\s+can\s+call\s+me|"
+    r"name\s*[:=])\s+"
 )
 _SELF_NAME_LABEL = re.compile(r"(?i)\b(?:i\s+am|i['’]m|this\s+is)\s+")
-_NAME_STOP = {"and","but","my","your","phone","mobile","email","account","pan","ifsc","otp","address","calling","speaking","from","regarding","about","because","for","trying","looking","here","not","available"}
+_NAME_STOP = {"and","but","my","your","phone","mobile","email","account","pan","ifsc","otp","address","calling","speaking","from","regarding","about","because","for","to","on","at","is","later","after","today","tomorrow","trying","looking","here","not","available"}
 _NAME_TOKEN = re.compile(r"[A-Za-z][A-Za-z.'-]{0,30}")
 
 
@@ -412,7 +433,7 @@ def _find_name_candidates(text: str) -> list[dict]:
 
 
 _ADDRESS_LABEL = re.compile(
-    r"(?i)\b(?:(?:my|your)\s+)?(?:(?:current|residential|registered|communication|permanent)\s+)?"
+    r"(?i)\b(?:(?:my|your)\s+)?(?:(?:current|residential|registered|communication|permanent|home|mailing|billing|shipping|delivery)\s+)?"
     r"address\s*(?:(?:is|:|=)\s*)?"
 )
 _ADDRESS_NEXT_FIELD = re.compile(
@@ -421,9 +442,10 @@ _ADDRESS_NEXT_FIELD = re.compile(
     r"(?:phone|mobile|contact|email|e-mail|pan|ifsc|account|a/c|otp|cvv|upi|dob|date\s+of\s+birth|"
     r"passport|voter\s+id|driving\s+licen[cs]e|card)\b"
 )
-_RESIDENTIAL_PREFIX = re.compile(r"(?i)\b(?:i\s+(?:live|reside|stay)\s+(?:at|in)|my\s+residence\s+is)\s+")
-_DELIVERY_PREFIX = re.compile(r"(?i)\b(?:send|deliver|ship|courier)\s+(?:(?:the|my|this)\s+)?(?:package|parcel|document|statement|card|item|order)?\s*(?:to|at)\s+")
+_RESIDENTIAL_PREFIX = re.compile(r"(?i)\b(?:i\s+(?:live|reside|stay|am\s+staying)\s+(?:at|in)|my\s+(?:residence|home)\s+is|you\s+can\s+find\s+me\s+at)\s+")
+_DELIVERY_PREFIX = re.compile(r"(?i)\b(?:send|deliver|ship|courier|mail)\s+(?:(?:the|my|this)\s+)?(?:package|parcel|document|statement|card|item|order|correspondence|letter)?\s*(?:to|at)\s+")
 _ADDRESS_LABEL_NEGATIVE_PREFIX = re.compile(r"(?i)(?:postal|pin|zip)\s+code\s+for\s+(?:my\s+)?$")
+_ADDRESS_EXPLANATORY_AFTER_LABEL = re.compile(r"(?i)^\s*(?:may|can|usually|typically|generally|should|must|often)\b")
 _ADDRESS_LOCATION_WORD = re.compile(r"(?i)\b(?:road|rd\.?|street|st\.?|lane|sector|nagar|colony|apartment|apartments|apt|flat|house|village|district|block|phase|floor|building|avenue|cross\s+road|extension)\b")
 _ADDRESS_POSTCODE = re.compile(r"(?<!\d)[1-9]\d{5}(?!\d)")
 
@@ -482,6 +504,8 @@ def _find_address_candidates(text: str) -> list[dict]:
     for m in _ADDRESS_LABEL.finditer(text):
         # "postal code for my address is 110016" owns a PINCODE, not an ADDRESS.
         if _ADDRESS_LABEL_NEGATIVE_PREFIX.search(_left_clause(text,m.start(),42)): continue
+        # Definitions such as "A residential address may contain..." are not values.
+        if _ADDRESS_EXPLANATORY_AFTER_LABEL.match(text[m.end():m.end()+48]): continue
         span=_bounded_address_after(text,m.end())
         if not span: continue
         s,e=span; body=text[s:e]
@@ -584,6 +608,106 @@ def _find_credential_candidates(text: str) -> list[dict]:
             item["decision_method"]="context_veto"
             item["evidence"]+="+example_veto"
         out.append(item)
+    return out
+
+
+# ---------- ASR-robust ownership-gated fallbacks ----------
+# These fallbacks hide the raw source span when ownership is extremely strong but ASR
+# damage prevents exact canonical validation. They never invent missing characters.
+_STRONG_PHONE_ASSIGN = re.compile(
+    r"(?i)\b(?:my\s+(?:(?:registered|alternate|secondary|backup|personal|work)\s+)?(?:phone|mobile|contact)(?:\s+number)?\s+(?:is|:)|"
+    r"(?:you\s+can\s+)?(?:call|reach|contact|text|message)\s+me\s+(?:at|on))\s*"
+    r"(?P<value>(?:plus\s+)?\+?[\d(][\d\s().\-]{6,24}\d)"
+)
+_STRONG_CARD_ASSIGN = re.compile(
+    r"(?i)\b(?:my\s+)?(?:(?:credit|debit)\s+)?card\s+number\s+(?:is|:|=)\s*(?P<value>[\d][\d\s.\-]{8,28}\d)"
+)
+_STRONG_PIN_ASSIGN = re.compile(
+    r"(?i)\b(?:my\s+|our\s+|registered\s+)?(?:pin\s*code|pincode|postal\s+code|zip\s+code)\s+(?:is|:|=)\s*(?P<value>(?:\d[\s,.-]*){5,7})"
+)
+_STRONG_IFSC_ASSIGN = re.compile(
+    r"(?i)\b(?:my\s+)?(?:bank\s+)?ifsc(?:\s+code)?\s+(?:is|:|=)\s*(?P<value>[^.!?;\n]{4,52})"
+)
+_STRONG_PASSPORT_ASSIGN = re.compile(
+    r"(?i)\b(?:my\s+)?passport(?:\s+(?:number|no\.?))?\s+(?:is|:|=)\s*(?P<value>[A-Za-z0-9][A-Za-z0-9\s,.-]{5,35})"
+)
+_STRONG_DL_ASSIGN = re.compile(
+    r"(?i)\b(?:my\s+)?(?:driving\s+licen[cs]e|driver'?s\s+licen[cs]e|dl)(?:\s+(?:number|no\.?))?\s+(?:is|:|=)\s*(?P<value>[A-Za-z0-9][A-Za-z0-9\s,.-]{8,42})"
+)
+_FIELDISH_STOP = re.compile(
+    r"(?i)(?:,\s*|\s+)(?:and\s+)?(?:(?:my|your|the)\s+)?(?:phone|mobile|email|account|ifsc|pan|upi|otp|cvv|address|dob|date\s+of\s+birth|passport|driving\s+licen[cs]e|transaction|complaint|order|reference)\b"
+)
+
+
+def _trim_fallback_value(raw: str) -> str:
+    raw=raw.strip(" \t,.:;=-")
+    m=_FIELDISH_STOP.search(raw)
+    if m: raw=raw[:m.start()]
+    return raw.strip(" \t,.:;=-")
+
+
+def _raw_digits_ok(raw: str, lo: int, hi: int) -> bool:
+    n=len(_digits(raw))
+    return lo<=n<=hi
+
+
+def _find_asr_fallback_candidates(text: str) -> list[dict]:
+    out=[]
+    # Phone: tolerate one or two ASR digit insertions/deletions only under explicit
+    # personal contact ownership. Helplines/order IDs are not covered by this grammar.
+    for m in _STRONG_PHONE_ASSIGN.finditer(text):
+        raw=_trim_fallback_value(m.group("value"))
+        if not _raw_digits_ok(raw,8,13): continue
+        s=m.start("value"); e=s+len(raw)
+        out.append(_raw_item("PHONE",s,e,text[s:e],0.94,"ownership_raw_phone_fallback",raw_fallback=True,ownership_strength=4))
+
+    # Card: do not reconstruct a failed Luhn value; mask the damaged numeric span when
+    # the utterance explicitly says it is the speaker's card number.
+    for m in _STRONG_CARD_ASSIGN.finditer(text):
+        prefix=text[max(0,m.start()-32):m.start()]
+        if re.search(r"(?i)\b(?:test|sample|example|demo)\s*$",prefix):
+            continue
+        raw=_trim_fallback_value(m.group("value"))
+        if not _raw_digits_ok(raw,9,19): continue
+        s=m.start("value"); e=s+len(raw)
+        out.append(_raw_item("CARD",s,e,text[s:e],0.945,"ownership_raw_card_fallback",raw_fallback=True,ownership_strength=4))
+
+    # PIN: 5-7 digits accommodates common ASR insert/delete errors while public-geography
+    # prose remains protected by the contextual veto.
+    for m in _STRONG_PIN_ASSIGN.finditer(text):
+        raw=_trim_fallback_value(m.group("value"))
+        if not _raw_digits_ok(raw,5,7): continue
+        s=m.start("value"); e=s+len(raw)
+        out.append(_raw_item("PINCODE",s,e,text[s:e],0.935,"ownership_raw_pincode_fallback",raw_fallback=True,ownership_strength=4))
+
+    # IFSC/passport/DL raw spans are useful when ASR corrupts phonetic alphabet words.
+    # Require both explicit assignment and enough alphanumeric/numeric evidence.
+    for m in _STRONG_IFSC_ASSIGN.finditer(text):
+        raw=_trim_fallback_value(m.group("value"))
+        compact=re.sub(r"[^A-Za-z0-9]","",raw)
+        if len(compact)<7 or sum(c.isdigit() for c in compact)<4: continue
+        s=m.start("value"); e=s+len(raw)
+        out.append(_raw_item("IFSC",s,e,text[s:e],0.925,"ownership_raw_ifsc_fallback",raw_fallback=True,ownership_strength=4))
+    for m in _STRONG_PASSPORT_ASSIGN.finditer(text):
+        raw=_trim_fallback_value(m.group("value"))
+        if not _raw_digits_ok(raw,6,8): continue
+        s=m.start("value"); e=s+len(raw)
+        out.append(_raw_item("PASSPORT",s,e,text[s:e],0.93,"ownership_raw_passport_fallback",raw_fallback=True,ownership_strength=4))
+    for m in _STRONG_DL_ASSIGN.finditer(text):
+        raw=_trim_fallback_value(m.group("value"))
+        if not _raw_digits_ok(raw,9,18): continue
+        s=m.start("value"); e=s+len(raw)
+        out.append(_raw_item("DRIVING_LICENSE",s,e,text[s:e],0.93,"ownership_raw_dl_fallback",raw_fallback=True,ownership_strength=4))
+
+    # ASR `local at provider` forms. Exact reconstruction is safe because we replace
+    # only the spoken word `at`; no missing letters/digits are guessed.
+    for c in find_mixed_at_candidates(text):
+        ctx=_role_left_context(text,c["start"],110)
+        provider=c["provider"]
+        if (EMAIL_CONTEXT.search(ctx) or EMAIL_DELIVERY_CONTEXT.search(ctx)) and "." in provider:
+            out.append(_raw_item("EMAIL",c["start"],c["end"],c["value"],0.975,"asr_mixed_email_at",canonical=c["canonical"],ownership_strength=4))
+        elif (UPI_CONTEXT.search(ctx) or UPI_PAYMENT_CONTEXT.search(ctx)) and provider in UPI_HANDLES:
+            out.append(_raw_item("UPI",c["start"],c["end"],c["value"],0.975,"asr_mixed_upi_at",canonical=c["canonical"],ownership_strength=4))
     return out
 
 
@@ -760,12 +884,12 @@ def _spoken_candidates(text: str) -> list[dict]:
     for c in find_spoken_email_candidates(text):
         ctx=_role_left_context(text,c["start"],88)
         domain=c["canonical"].rsplit("@",1)[-1]
-        if EMAIL_CONTEXT.search(ctx) or domain.split(".",1)[0] in {"gmail","yahoo","outlook","hotmail","protonmail","icloud"}:
+        if EMAIL_CONTEXT.search(ctx) or EMAIL_DELIVERY_CONTEXT.search(ctx) or domain.split(".",1)[0] in {"gmail","yahoo","outlook","hotmail","protonmail","icloud"}:
             out.append(_raw_item("EMAIL",c["start"],c["end"],c["value"],0.95,c["evidence"],canonical=c["canonical"]))
     for c in find_spoken_handle_candidates(text):
         ctx=_role_left_context(text,c["start"],90)
         provider=c["canonical"].rsplit("@",1)[-1]
-        if UPI_CONTEXT.search(ctx) and (provider in UPI_HANDLES or len(provider)>=2):
+        if (UPI_CONTEXT.search(ctx) or UPI_PAYMENT_CONTEXT.search(ctx)) and (provider in UPI_HANDLES or len(provider)>=2):
             out.append(_raw_item("UPI",c["start"],c["end"],c["value"],0.96,"spoken_upi_normalized",canonical=c["canonical"]))
     for c in find_spoken_date_candidates(text):
         if DOB_CONTEXT.search(_role_left_context(text,c["start"],100)):
@@ -927,7 +1051,7 @@ def detect_pii(
         if len(local)!=10 or local[0] not in "6789": continue
         left=_role_left_context(text,m.start(),84)
         positive=bool(PHONE_POSITIVE_CONTEXT.search(left) or PHONE_FOLLOWING_CONTEXT.search(_right_clause(text,m.end(),72)))
-        negative=bool(PHONE_NEGATIVE_CONTEXT.search(left))
+        negative=bool(PHONE_NEGATIVE_CONTEXT.search(left) or PUBLIC_PHONE_CONTEXT.search(left))
         if positive:
             found.append(_item("PHONE",m,0.985,"phone_context"))
         elif negative:
@@ -977,10 +1101,11 @@ def detect_pii(
     found.extend(_find_address_candidates(text))
     found.extend(_find_partial_identifier_candidates(text))
     found.extend(_find_credential_candidates(text))
+    found.extend(_find_asr_fallback_candidates(text))
     found.extend(_spoken_candidates(text))
     found.extend(_find_expected_state_candidates(text))
 
-    # v4.8 architecture: field-clause segmentation -> candidate -> validator ->
+    # v4.9 architecture: field-clause segmentation -> candidate -> validator ->
     # occurrence/discourse ownership -> context veto -> optional AI -> ownership-weighted
     # conflict resolver. Hard negative context runs before AI for speed and precision.
     found=_apply_occurrence_context_policy(text,found)

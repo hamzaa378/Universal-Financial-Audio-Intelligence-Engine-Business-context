@@ -1,0 +1,19 @@
+{"id":"v49-corrupt-owned-phone","text":"You can also contact me at plus 911-23456789.","expected":[{"type":"PHONE","value":"plus 911-23456789"}]}
+{"id":"v49-mixed-email","text":"My email address is arov.com at example.com.","expected":[{"type":"EMAIL","value":"arov.com at example.com"}]}
+{"id":"v49-email-delivery","text":"Send the confirmation to sara.private at mail.co.in.","expected":[{"type":"EMAIL","value":"sara.private at mail.co.in"}]}
+{"id":"v49-mixed-pan","text":"My PAN number is Alpha Bravo Charlie Delta Echo 1234 Foxtrot.","expected":[{"type":"PAN","value":"Alpha Bravo Charlie Delta Echo 1234 Foxtrot"}]}
+{"id":"v49-corrupt-ifsc","text":"My bank IFSC is Hotel Delta Foxtrott ID, Charlie 00001234.","expected":[{"type":"IFSC","value":"Hotel Delta Foxtrott ID, Charlie 00001234"}]}
+{"id":"v49-mixed-upi","text":"My UPI address is rf.con at OKSBI.","expected":[{"type":"UPI","value":"rf.con at OKSBI"}]}
+{"id":"v49-payment-upi","text":"Pay me at sara dot khan at oksbi.","expected":[{"type":"UPI","value":"sara dot khan at oksbi"}]}
+{"id":"v49-corrupt-card","text":"My credit card number is 4111-1111-111.","expected":[{"type":"CARD","value":"4111-1111-111"}]}
+{"id":"v49-corrupt-pin","text":"My PIN code is 4111045.","expected":[{"type":"PINCODE","value":"4111045"}]}
+{"id":"v49-passport-nato-uppercase","text":"My passport is PAPA 1234567.","expected":[{"type":"PASSPORT","value":"PAPA 1234567"}]}
+{"id":"v49-fuzzy-dl-state","text":"My driving license number is Carnitaka0120210012345.","expected":[{"type":"DRIVING_LICENSE","value":"Carnitaka0120210012345"}]}
+{"id":"v49-preferred-name","text":"I prefer to be called Aisha Noor.","expected":[{"type":"NAME","value":"Aisha Noor"}]}
+{"id":"v49-best-contact-number","text":"The best number to reach me is 9988776655.","expected":[{"type":"PHONE","value":"9988776655"}]}
+{"id":"v49-mailing-address","text":"My mailing address is 10 Green Road, Pune 411001.","expected":[{"type":"ADDRESS","value":"10 Green Road, Pune 411001"}]}
+{"id":"v49-address-explanation-negative","text":"A residential address may contain a house number, road, city and PIN code.","expected":[]}
+{"id":"v49-upi-explanation-negative","text":"A UPI ID usually contains an at sign.","expected":[]}
+{"id":"v49-public-helpline-negative","text":"The customer support helpline is 911-2456789.","expected":[]}
+{"id":"v49-test-card-negative","text":"The test card number is 4111-1111-111.","expected":[]}
+{"id":"v49-public-postcode-negative","text":"The postal code 4111045 covers part of Pune.","expected":[]}

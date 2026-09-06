@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from difflib import SequenceMatcher
 
 _SAFE_ID_SEP_RE = re.compile(r"[\s._\-‐‑‒–—]+")
 
@@ -114,9 +115,9 @@ _NATO_WORDS = {
     "victor":"V", "whiskey":"W", "xray":"X", "x-ray":"X", "yankee":"Y", "zulu":"Z",
 }
 _NATO_TOKEN = "(?:" + "|".join(sorted((re.escape(x) for x in _NATO_WORDS), key=len, reverse=True)) + ")"
-_SPOKEN_ALNUM_TOKEN = rf"(?:{_NATO_TOKEN}|[A-Z]|{_DIGIT_TOKEN})"
+_SPOKEN_ALNUM_TOKEN = rf"(?:{_NATO_TOKEN}|[A-Z]|\d{{1,12}}|{_DIGIT_TOKEN})"
 _SPOKEN_ALNUM_RUN = re.compile(
-    rf"(?i)(?<!\w){_SPOKEN_ALNUM_TOKEN}(?:[\s,.;:\-]+{_SPOKEN_ALNUM_TOKEN}){{5,}}(?!\w)"
+    rf"(?i)(?<!\w){_SPOKEN_ALNUM_TOKEN}(?:[\s,.;:\-]+{_SPOKEN_ALNUM_TOKEN}){{1,}}(?!\w)"
 )
 _SPOKEN_ALNUM_TOKEN_RE = re.compile(rf"(?i)(?<!\w)({_SPOKEN_ALNUM_TOKEN})(?!\w)")
 
@@ -133,6 +134,8 @@ def parse_spoken_alnum(raw: str) -> str:
             repeat=3; continue
         if t in _DIGIT_WORDS:
             value=_DIGIT_WORDS[t]
+        elif token.isdigit():
+            value=token
         elif t in _NATO_WORDS:
             value=_NATO_WORDS[t]
         elif len(token)==1 and token.isalpha():
@@ -183,16 +186,23 @@ def _normalize_email_side(raw: str, *, domain: bool = False) -> str:
 
 
 def find_spoken_email_candidates(text: str) -> list[dict]:
-    out = []
-    for m in _SPOKEN_EMAIL.finditer(text):
-        local = _normalize_email_side(m.group(1))
-        domain = _normalize_email_side(m.group(2), domain=True)
-        canonical = f"{local}@{domain}"
-        # Conservative structural check after normalization.
-        if re.fullmatch(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", canonical, flags=re.I):
+    out=[]; pos=0; seen=set()
+    while pos < len(text):
+        m=_SPOKEN_EMAIL.search(text,pos)
+        if not m: break
+        pos=m.start()+1
+        local=_normalize_email_side(m.group(1))
+        if local in {"me","you","him","her","them","it"}:
+            continue
+        domain=_normalize_email_side(m.group(2),domain=True)
+        canonical=f"{local}@{domain}"
+        key=(m.start(),m.end())
+        if key in seen: continue
+        seen.add(key)
+        if re.fullmatch(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}",canonical,flags=re.I):
             out.append({
-                "start": m.start(), "end": m.end(), "value": m.group(0),
-                "canonical": canonical, "evidence": "spoken_email_multilevel",
+                "start":m.start(),"end":m.end(),"value":m.group(0),
+                "canonical":canonical,"evidence":"spoken_email_multilevel",
             })
     return out
 
@@ -210,16 +220,64 @@ _SPOKEN_HANDLE = re.compile(
 
 
 def find_spoken_handle_candidates(text: str) -> list[dict]:
-    out=[]
-    for m in _SPOKEN_HANDLE.finditer(text):
+    out=[]; pos=0; seen=set()
+    while pos < len(text):
+        m=_SPOKEN_HANDLE.search(text,pos)
+        if not m: break
+        pos=m.start()+1
         local=_normalize_email_side(m.group(1))
+        if local in {"me","you","him","her","them","it"}:
+            continue
         handle=re.sub(r"\s+","",m.group(2)).lower()
         canonical=f"{local}@{handle}"
+        key=(m.start(),m.end())
+        if key in seen: continue
+        seen.add(key)
         if re.fullmatch(r"[a-z0-9._-]{2,64}@[a-z][a-z0-9_-]{1,31}",canonical,re.I):
             out.append({
                 "start":m.start(),"end":m.end(),"value":m.group(0),
                 "canonical":canonical,"evidence":"spoken_handle_normalized",
             })
+    return out
+
+
+# ASR often emits the separators literally ("sara.private at mail.co.in") rather
+# than saying "dot". These candidates intentionally preserve the original span and
+# only normalize the spoken `at`; ownership/type policy remains in the PII layer.
+_MIXED_AT_ADDRESS = re.compile(
+    r"(?i)(?<![\w.+-])([a-z0-9][a-z0-9._%+-]{1,63})\s+(?:at|at\s+the\s+rate(?:\s+of)?)\s+"
+    r"([a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)*)(?![\w-])"
+)
+
+
+def find_mixed_at_candidates(text: str) -> list[dict]:
+    """Return ASR `local at provider/domain` candidates.
+
+    Overlapping searches are intentional: in "mail me at sara.private at mail.co.in"
+    the first syntactic `at` is not part of the address, while the second one is.
+    """
+    out=[]; pos=0; seen=set()
+    while pos < len(text):
+        m=_MIXED_AT_ADDRESS.search(text,pos)
+        if not m: break
+        pos=m.start()+1
+        prefix=text[max(0,m.start()-18):m.start()]
+        if re.search(r"(?i)\b(?:dot|underscore|under\s*score|dash|hyphen)\s+$",prefix):
+            continue
+        local=m.group(1).lower()
+        provider=m.group(2).lower()
+        # Command pronouns are almost never the actual local part; skipping them lets
+        # the overlapping scan find the later real candidate.
+        if local in {"me","you","him","her","them","it"}:
+            continue
+        key=(m.start(),m.end())
+        if key in seen: continue
+        seen.add(key)
+        canonical=f"{local}@{provider}"
+        out.append({
+            "start":m.start(),"end":m.end(),"value":m.group(0),
+            "canonical":canonical,"provider":provider,"evidence":"asr_mixed_at_normalized",
+        })
     return out
 
 
@@ -332,12 +390,33 @@ _INDIA_STATE_DL = {
     "uttarakhand":"UK","west bengal":"WB","delhi":"DL","chandigarh":"CH",
     "puducherry":"PY","pondicherry":"PY","jammu and kashmir":"JK","ladakh":"LA",
 }
+
+
+def _normalize_state_phrase(raw: str) -> str | None:
+    """Map a state name to a DL prefix with conservative ASR fuzziness.
+
+    Exact matches always win. Fuzzy matching is intentionally limited to state-name
+    candidates and requires a high similarity; callers additionally require explicit
+    driving-licence context and a structurally valid numeric suffix.
+    """
+    key=re.sub(r"[^a-z ]+","",raw.casefold()).strip()
+    key=re.sub(r"\s+"," ",key)
+    if key in _INDIA_STATE_DL:
+        return _INDIA_STATE_DL[key]
+    best=None; best_score=0.0
+    for name,code in _INDIA_STATE_DL.items():
+        score=SequenceMatcher(None,key,name).ratio()
+        if score>best_score:
+            best_score=score; best=code
+    return best if best_score>=0.76 else None
+
 _STATE_WORD_RE="(?:"+"|".join(sorted((re.escape(x) for x in _INDIA_STATE_DL),key=len,reverse=True))+")"
 _SPOKEN_DL_STATE=re.compile(rf"(?i)(?<!\w)({_STATE_WORD_RE})\s+({_DIGIT_TOKEN}(?:[\s,.;:\-]+{_DIGIT_TOKEN}){{8,16}})(?!\w)")
+_ASR_DL_STATE_MIXED=re.compile(r"(?i)(?<!\w)([A-Za-z][A-Za-z ]{2,24}?)[\s,.;:\-]*((?:\d[\s,.;:\-]*){9,18})(?!\d)")
 
 
 def find_spoken_driving_license_candidates(text: str) -> list[dict]:
-    out=[]
+    out=[]; seen=set()
     for m in _SPOKEN_DL_STATE.finditer(text):
         state=_INDIA_STATE_DL[m.group(1).casefold()]
         digits=parse_spoken_digits(m.group(2))
@@ -346,5 +425,17 @@ def find_spoken_driving_license_candidates(text: str) -> list[dict]:
             out.append({
                 "start":m.start(),"end":m.end(),"value":m.group(0),
                 "canonical":canonical,"evidence":"spoken_state_driving_license",
+            }); seen.add((m.start(),m.end()))
+    # Mixed ASR form: "Carnitaka0120210012345" or "Karnatika 01 2021 0012345".
+    for m in _ASR_DL_STATE_MIXED.finditer(text):
+        if (m.start(),m.end()) in seen: continue
+        state=_normalize_state_phrase(m.group(1))
+        if not state: continue
+        digits=re.sub(r"\D","",m.group(2))
+        canonical=state+digits
+        if re.fullmatch(r"[A-Z]{2}[0-9]{2}(?:(?:19|20)[0-9]{2})?[0-9]{7}",canonical):
+            out.append({
+                "start":m.start(),"end":m.end(),"value":m.group(0),
+                "canonical":canonical,"evidence":"asr_fuzzy_state_driving_license",
             })
-    return out
+    return sorted(out,key=lambda x:x["start"])
