@@ -1,0 +1,16 @@
+{"id":"v47-long-multifield","text":"Final combined sentence: my name is Sara Mohammed Khan, DOB 21 January 2002, phone plus nine one nine eight seven six five four three two one zero, email sara dot khan at example dot com, account number zero zero one two three four five six seven eight nine zero one two, IFSC HDFC zero zero zero one two three four, and address Flat number nine B, Sunrise Apartments, Baner Road, Pune four one one zero four five.","expected":[{"type":"NAME","value":"Sara Mohammed Khan"},{"type":"DOB","value":"21 January 2002"},{"type":"PHONE","value":"plus nine one nine eight seven six five four three two one zero"},{"type":"EMAIL","value":"sara dot khan at example dot com"},{"type":"ACCOUNT_NUMBER","value":"zero zero one two three four five six seven eight nine zero one two"},{"type":"IFSC","value":"HDFC zero zero zero one two three four"},{"type":"ADDRESS","value":"Flat number nine B, Sunrise Apartments, Baner Road, Pune four one one zero four five"}]}
+{"id":"v47-state-aadhaar","text":"Please enter your Aadhaar number. Mine is 4567 8901 2345.","expected":[{"type":"AADHAAR","value":"4567 8901 2345"}]}
+{"id":"v47-state-phone","text":"Type your mobile number below. Mine is 9098765432.","expected":[{"type":"PHONE","value":"9098765432"}]}
+{"id":"v47-state-otp","text":"An OTP will be sent shortly. I received 843291.","expected":[{"type":"OTP","value":"843291"}]}
+{"id":"v47-state-cvv","text":"The CVV is located on the back of a payment card. Mine is 617.","expected":[{"type":"CVV","value":"617"}]}
+{"id":"v47-state-no-response","text":"Please enter your Aadhaar number. The invoice number is 4567 8901 2345.","expected":[]}
+{"id":"v47-state-ttl","text":"Please enter your Aadhaar number. Let me check. Mine is 4567 8901 2345.","expected":[]}
+{"id":"v47-owner-account-over-card","text":"My account is 4111 1111 1111 1111.","expected":[{"type":"ACCOUNT_NUMBER","value":"4111 1111 1111 1111"}]}
+{"id":"v47-spoken-dob","text":"My date of birth is twenty-first January two thousand two.","expected":[{"type":"DOB","value":"twenty-first January two thousand two"}]}
+{"id":"v47-spoken-upi","text":"My UPI address is sara dot khan at oksbi.","expected":[{"type":"UPI","value":"sara dot khan at oksbi"}]}
+{"id":"v47-spoken-upi-doc-negative","text":"The documentation example says user dot name at oksbi.","expected":[]}
+{"id":"v47-spoken-passport","text":"My passport is Papa one two three four five six seven.","expected":[{"type":"PASSPORT","value":"Papa one two three four five six seven"}]}
+{"id":"v47-spoken-dl","text":"My driving licence number is Karnataka zero one, two zero two one, zero zero one two three four five.","expected":[{"type":"DRIVING_LICENSE","value":"Karnataka zero one, two zero two one, zero zero one two three four five"}]}
+{"id":"v47-full-name","text":"My full name is Sara Mohammed Khan.","expected":[{"type":"NAME","value":"Sara Mohammed Khan"}]}
+{"id":"v47-registered-name","text":"My registered name is Aisha Noor.","expected":[{"type":"NAME","value":"Aisha Noor"}]}
+{"id":"v47-public-name-negative","text":"Raj Kumar is the name of the support agent shown on the public help page.","expected":[]}

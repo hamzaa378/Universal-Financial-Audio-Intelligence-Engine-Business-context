@@ -1,6 +1,6 @@
-# Universal Financial Audio Intelligence Engine — v4.6 Occurrence-Aware Privacy Hybrid
+# Universal Financial Audio Intelligence Engine — v4.7 Context-Recall Privacy Hybrid
 
-v4.6 keeps the v4.5 GPU/audio privacy path and adds an occurrence-aware decision layer aimed specifically at reducing contextual false positives while improving masking recall. A validator now proves identifier shape; a separate ownership/context stage decides whether that exact occurrence should be hidden.
+v4.7 keeps the v4.6 occurrence-aware precision layer and adds field-clause segmentation, one-sentence discourse ownership, ownership-weighted conflict resolution, and stronger spoken identifier normalization. The goal is to recover difficult true PII without giving up the false-positive reductions from v4.6.
 
 ## Processing architecture
 
@@ -13,14 +13,19 @@ Audio / microphone
   -> ASR-aware normalization
        - spoken digits
        - multi-level spoken email
+       - spoken UPI/VPA handles
+       - spoken DOB phrases
+       - spoken passport / driving-licence forms
        - separator-normalized IFSC
        - natural-language dates
+  -> field-aware clause segmentation
   -> deterministic privacy candidates / validators
   -> occurrence-specific ownership + role context
+  -> one-sentence expected-field state for owned follow-up answers
   -> example/document/reference veto
   -> optional token NER support for ambiguous clauses
   -> optional semantic privacy judge using local grammatical role
-  -> conflict resolver
+  -> ownership-weighted conflict resolver
   -> token-owned PII/profanity entities
   -> protected transcript + token-time audio redaction
   -> financial entities / intent / obligations / regulatory screening
@@ -28,7 +33,15 @@ Audio / microphone
 ```
 
 
-## v4.6 context-precision improvements
+## v4.7 context-recall improvements
+
+- Long multi-PII sentences are segmented at field transitions before semantic/context decisions, preventing one field from contaminating another.
+- A one-sentence `expected_type` state can connect prompts such as `Please enter your Aadhaar number.` to owned replies such as `Mine is ...`; it expires after exactly one sentence and requires response ownership.
+- Conflict resolution ranks explicit ownership before ambiguous format confidence, e.g. `My account is 4111...` resolves to ACCOUNT_NUMBER rather than CARD.
+- Spoken DOB, UPI, passport and Indian driving-licence dictation are normalized under explicit type context.
+- `my full name is ...` and `my registered name is ...` are supported with bounded name extraction.
+
+## v4.6 context-precision improvements retained
 
 - Identical values are classified independently per occurrence; a DOB/phone role is never cached by literal value.
 - Documentation, sample, tutorial, test-value, source-code and reference roles can veto valid-looking PII when ownership is absent.
@@ -42,7 +55,7 @@ Audio / microphone
 - NATO/phonetic-alphabet PAN and IFSC dictation is normalized under explicit PAN/IFSC context.
 - Transaction/ticket/complaint/customer/application identifiers are still available, but their separate operational-ID layer is disabled by default to reduce false positives.
 
-See `V4_6_CHANGES.md` for the detailed rationale and regression cases.
+See `V4_7_CHANGES.md` for the new recall architecture and `V4_6_CHANGES.md` for the precision-layer rationale.
 
 ## IFSC robustness
 
@@ -144,7 +157,7 @@ Diarization             OFF unless needed
 run_privacy_benchmark.bat
 ```
 
-The bundled synthetic regression suite is for development regression only. It is not a production-accuracy claim. v4.6 also runs `benchmarks\context_precision_v46.jsonl`, which specifically covers documentation/examples, same-value role changes, implicit phone ownership, delivery addresses, self-identification, and credentials.
+The bundled synthetic regression suites are for development regression only. They are not production-accuracy claims. v4.7 retains `benchmarks\context_precision_v46.jsonl` and adds `benchmarks\context_recall_v47.jsonl` for field segmentation, one-sentence discourse ownership, ownership conflicts, spoken DOB/UPI/passport/driving-licence values, and full/registered names.
 
 ## Real audio manifest benchmark
 

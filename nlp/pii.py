@@ -1,4 +1,4 @@
-"""Privacy-first PII detection for financial-call transcripts (v4.5).
+"""Privacy-first PII detection for financial-call transcripts (v4.7).
 
 Pipeline:
 ASR text -> ASR-aware normalization candidates -> deterministic validators -> optional
@@ -17,9 +17,12 @@ from decision_ai.ner_engine import support_candidates as ner_support_candidates,
 from nlp.normalization import (
     find_ifsc_candidates,
     find_spoken_email_candidates,
+    find_spoken_handle_candidates,
     find_spoken_digit_runs,
     find_spoken_alnum_runs,
     find_natural_date_candidates,
+    find_spoken_date_candidates,
+    find_spoken_driving_license_candidates,
 )
 
 # ---------- deterministic validators ----------
@@ -158,6 +161,21 @@ _ROLE_RESET = re.compile(
     r"application(?:\s+deadline)?|invoice|tracking|phone|mobile|account|ifsc|pan|email|upi|otp|cvv|address|dob|"
     r"date\s+of\s+birth|meeting|report)\b))"
 )
+
+# Field-aware clause segmentation. Sentence-level context is too broad for utterances
+# such as "my name is X, DOB Y, phone Z, email example dot com" because the word
+# "example" in the email clause can incorrectly veto earlier fields. These boundaries
+# are used only for ownership/semantic context; source spans remain untouched.
+_FIELD_LABEL_CORE = (
+    r"(?:full\s+name|registered\s+name|legal\s+name|official\s+name|name|dob|date\s+of\s+birth|"
+    r"phone(?:\s+number)?|mobile(?:\s+number)?|contact(?:\s+number)?|email(?:\s+address)?|e-mail|"
+    r"account(?:\s+number)?|a/c|acct|ifsc(?:\s+code)?|pan(?:\s+number)?|upi(?:\s+(?:id|address))?|"
+    r"aadhaar(?:\s+number)?|aadhar(?:\s+number)?|otp|cvv|cvc|pin\s*code|pincode|postal\s+code|"
+    r"passport(?:\s+number)?|voter\s+id|driving\s+licen[cs]e(?:\s+number)?|card(?:\s+number)?|address)"
+)
+_FIELD_SPLIT = re.compile(
+    rf"(?i)(?:,\s*|\band\s+)(?=(?:(?:my|your|the)\s+)?{_FIELD_LABEL_CORE}\b)"
+)
 ADDRESS_HINT = re.compile(
     r"(?i)(?:\d|\b(?:road|rd|street|st|lane|sector|nagar|colony|apartment|apt|flat|house|village|district|block|phase|floor|near|opp(?:osite)?|building)\b)"
 )
@@ -182,19 +200,36 @@ def _clause_bounds(text: str, start: int, end: int, radius: int=180) -> tuple[in
     return lo,hi
 
 
+def _field_clause_bounds(text: str, start: int, end: int, radius: int=220) -> tuple[int,int]:
+    """Return the smallest sentence-local field clause containing this occurrence."""
+    lo,hi=_clause_bounds(text,start,end,radius)
+    segment=text[lo:hi]
+    rel_start=start-lo; rel_end=end-lo
+    left_cut=0; right_cut=len(segment)
+    for m in _FIELD_SPLIT.finditer(segment):
+        if m.end() <= rel_start:
+            left_cut=m.end()
+            continue
+        if m.start() >= rel_end:
+            right_cut=m.start()
+            break
+    return lo+left_cut,lo+right_cut
+
+
 def _role_left_context(text: str, start: int, radius: int = 96) -> str:
     """Return the local grammatical role before this exact occurrence.
 
     Contrastive conjunctions and commas reset ownership. This prevents a role such as
     DOB/PHONE from leaking to a second identical value later in the same sentence.
     """
-    left=_left_clause(text,start,radius)
+    lo,_=_field_clause_bounds(text,start,start,max(radius,150))
+    left=text[max(lo,start-radius):start]
     cuts=[m.end() for m in _ROLE_RESET.finditer(left)]
     return left[max(cuts) if cuts else 0:]
 
 
 def _occurrence_clause(text: str, start: int, end: int, radius: int = 150) -> str:
-    lo,hi=_clause_bounds(text,start,end,radius)
+    lo,hi=_field_clause_bounds(text,start,end,max(radius,180))
     return text[lo:hi]
 
 
@@ -204,12 +239,13 @@ def _occurrence_context(text: str, start: int, end: int, radius: int = 150) -> s
     This prevents candidate content such as `example.com` or a token containing the
     substring `Example` from triggering documentation/example suppression by itself.
     """
-    lo,hi=_clause_bounds(text,start,end,radius)
+    lo,hi=_field_clause_bounds(text,start,end,max(radius,180))
     return (text[lo:start] + " <VALUE> " + text[end:hi]).strip()
 
 
 def _right_clause(text: str, end: int, radius: int = 72) -> str:
-    hi=min(len(text),end+radius)
+    _,field_hi=_field_clause_bounds(text,end,end,max(radius,150))
+    hi=min(field_hi,end+radius)
     for sep in (".","!","?","\n",";"):
         pos=text.find(sep,end,hi)
         if pos>=0: hi=min(hi,pos)
@@ -294,7 +330,18 @@ def _resolve_conflicts(items: Iterable[dict]) -> list[dict]:
         "PHONE":90,"USERNAME":88,"ACCOUNT_NUMBER":85,"DOB":80,"OTP":78,"CVV":77,
         "PINCODE":75,"NAME":70,
     }
-    ranked=sorted(items,key=lambda x:(-x["confidence"],-priority.get(x["type"],0),-(x["end"]-x["start"]),x["start"]))
+    # Explicit ownership is stronger evidence than an ambiguous format match. This is
+    # especially important for overlapping ACCOUNT_NUMBER/CARD candidates.
+    ranked=sorted(
+        items,
+        key=lambda x:(
+            -int(x.get("ownership_strength",0)),
+            -x["confidence"],
+            -priority.get(x["type"],0),
+            -(x["end"]-x["start"]),
+            x["start"],
+        ),
+    )
     chosen=[]
     for item in ranked:
         if not any(_overlaps(item,c) for c in chosen):
@@ -303,14 +350,17 @@ def _resolve_conflicts(items: Iterable[dict]) -> list[dict]:
 
 
 # ---------- bounded NAME / ADDRESS / SECRET extraction ----------
-_NAME_LABEL = re.compile(r"(?i)\b(?:my\s+name\s+is|(?:customer|applicant|borrower)\s+name\s+is|name\s*[:=])\s+")
+_NAME_LABEL = re.compile(
+    r"(?i)\b(?:my\s+(?:full\s+|registered\s+|legal\s+|official\s+)?name\s+is|"
+    r"(?:customer|applicant|borrower)\s+name\s+is|name\s*[:=])\s+"
+)
 _SELF_NAME_LABEL = re.compile(r"(?i)\b(?:i\s+am|i['’]m|this\s+is)\s+")
 _NAME_STOP = {"and","but","my","your","phone","mobile","email","account","pan","ifsc","otp","address","calling","speaking","from","regarding","about","because","for","trying","looking","here","not","available"}
 _NAME_TOKEN = re.compile(r"[A-Za-z][A-Za-z.'-]{0,30}")
 
 
 def _name_after_label(text: str, lo: int, *, require_two: bool=False, self_identification: bool=False) -> dict | None:
-    _,hi=_clause_bounds(text,lo,lo,100)
+    _,hi=_field_clause_bounds(text,lo,lo,130)
     body=text[lo:hi]
     tokens=[]; end=0
     for m in re.finditer(r"\S+",body):
@@ -340,7 +390,10 @@ def _find_name_candidates(text: str) -> list[dict]:
     return out
 
 
-_ADDRESS_LABEL = re.compile(r"(?i)\b(?:(?:my|your)\s+)?(?:(?:current|residential|registered|communication|permanent)\s+)?address\s*(?:is|:|=)\s*")
+_ADDRESS_LABEL = re.compile(
+    r"(?i)\b(?:(?:my|your)\s+)?(?:(?:current|residential|registered|communication|permanent)\s+)?"
+    r"address\s*(?:(?:is|:|=)\s*)?"
+)
 _ADDRESS_NEXT_FIELD = re.compile(
     r"(?i)\s+(?:and\s+)?(?:my\s+|the\s+)?(?:phone|mobile|email|e-mail|pan|ifsc|account|a/c|otp|cvv|upi|dob|date\s+of\s+birth)\b"
 )
@@ -478,6 +531,161 @@ def _find_credential_candidates(text: str) -> list[dict]:
     return out
 
 
+# ---------- short-lived discourse ownership ----------
+
+_SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|$)")
+_RESPONSE_OWNERSHIP = re.compile(
+    r"(?i)^\s*(?:mine\s+is|it\s+is|i\s+(?:received|got|have|use)|the\s+(?:number|code|value)\s+is)\b"
+)
+
+
+def _sentence_spans(text: str) -> list[tuple[int,int]]:
+    return [(m.start(),m.end()) for m in _SENTENCE_RE.finditer(text) if m.group(0).strip()]
+
+
+def _infer_expected_type(sentence: str) -> str | None:
+    """Infer one field requested/described by the immediately previous sentence.
+
+    The state is intentionally tiny: only the next sentence can consume it, and the
+    next sentence must begin with an ownership response such as "Mine is" or
+    "I received". This improves recall without turning discourse history into a broad
+    masking signal.
+    """
+    checks=(
+        ("AADHAAR",AADHAAR_CONTEXT),("PAN",PAN_CONTEXT),("EMAIL",EMAIL_CONTEXT),
+        ("PHONE",PHONE_POSITIVE_CONTEXT),("UPI",UPI_CONTEXT),("IFSC",IFSC_CONTEXT),
+        ("OTP",OTP_CONTEXT),("CVV",CVV_CONTEXT),("ACCOUNT_NUMBER",ACCOUNT_CONTEXT),
+        ("PINCODE",PIN_CONTEXT),("DOB",DOB_CONTEXT),("PASSPORT",PASSPORT_CONTEXT),
+        ("DRIVING_LICENSE",DL_CONTEXT),("VOTER_ID",VOTER_CONTEXT),("CARD",CARD_CONTEXT),
+    )
+    hits=[]
+    for kind,pat in checks:
+        m=pat.search(sentence)
+        if m: hits.append((m.start(),kind))
+    if re.search(r"(?i)\b(?:residential|permanent|current|registered)?\s*address\b",sentence):
+        m=re.search(r"(?i)\b(?:residential|permanent|current|registered)?\s*address\b",sentence)
+        if m: hits.append((m.start(),"ADDRESS"))
+    if not hits: return None
+    hits.sort(key=lambda x:x[0])
+    # Earliest explicit field wins. This handles "The CVV ... payment card" as CVV,
+    # not CARD, because CVV is the grammatical topic.
+    return hits[0][1]
+
+
+def _offset_item(item: dict, offset: int, **extra) -> dict:
+    x=dict(item)
+    x["start"]+=offset; x["end"]+=offset
+    x.update(extra)
+    return x
+
+
+def _expected_response_candidate(kind: str, sentence: str, sent_start: int) -> dict | None:
+    marker=_RESPONSE_OWNERSHIP.search(sentence)
+    if not marker: return None
+    tail=sentence[marker.end():]
+    base=sent_start+marker.end()
+
+    def from_regex(pattern: re.Pattern, confidence: float, evidence: str, validator=None):
+        m=pattern.search(tail)
+        if not m or (validator and not validator(m.group(0))): return None
+        return _raw_item(
+            kind,base+m.start(),base+m.end(),m.group(0),confidence,evidence,
+            expected_type_state=True,ownership_strength=4,
+        )
+
+    if kind=="AADHAAR":
+        return from_regex(_AADHAAR,0.97,"expected_type_response_aadhaar",lambda v:len(_digits(v))==12)
+    if kind=="PHONE":
+        return from_regex(_PHONE,0.97,"expected_type_response_phone",lambda v:len(_digits(v)[-10:])==10 and _digits(v)[-10] in "6789")
+    if kind=="PAN": return from_regex(_PAN,0.985,"expected_type_response_pan")
+    if kind=="EMAIL": return from_regex(_EMAIL,0.985,"expected_type_response_email")
+    if kind=="UPI": return from_regex(_UPI,0.975,"expected_type_response_upi")
+    if kind=="ACCOUNT_NUMBER": return from_regex(_LONG_NUMBER,0.97,"expected_type_response_account")
+    if kind=="OTP": return from_regex(_OTP,0.97,"expected_type_response_otp")
+    if kind=="CVV": return from_regex(_CVV,0.97,"expected_type_response_cvv")
+    if kind=="PINCODE": return from_regex(_PINCODE,0.96,"expected_type_response_pincode")
+    if kind=="DOB":
+        x=from_regex(_DOB,0.97,"expected_type_response_dob")
+        if x: return x
+        for c in find_natural_date_candidates(tail)+find_spoken_date_candidates(tail):
+            return _raw_item("DOB",base+c["start"],base+c["end"],c["value"],0.97,"expected_type_response_dob",canonical=c.get("canonical"),expected_type_state=True,ownership_strength=4)
+        return None
+    if kind=="PASSPORT":
+        x=from_regex(_PASSPORT,0.97,"expected_type_response_passport")
+        if x: return x
+        for c in find_spoken_alnum_runs(tail):
+            canonical=c["canonical"].upper()
+            if re.fullmatch(r"[A-Z][1-9][0-9]{6}",canonical):
+                return _raw_item("PASSPORT",base+c["start"],base+c["end"],c["value"],0.97,"expected_type_response_passport",canonical=canonical,expected_type_state=True,ownership_strength=4)
+        return None
+    if kind=="DRIVING_LICENSE":
+        x=from_regex(_DRIVING_LICENSE,0.97,"expected_type_response_driving_license")
+        if x: return x
+        for c in find_spoken_driving_license_candidates(tail):
+            return _raw_item("DRIVING_LICENSE",base+c["start"],base+c["end"],c["value"],0.97,"expected_type_response_driving_license",canonical=c["canonical"],expected_type_state=True,ownership_strength=4)
+        return None
+    if kind=="VOTER_ID": return from_regex(_VOTER_ID,0.97,"expected_type_response_voter")
+    if kind=="CARD": return from_regex(_CARD,0.985,"expected_type_response_card",luhn_valid)
+    if kind=="IFSC":
+        for c in find_ifsc_candidates(tail):
+            return _raw_item("IFSC",base+c["start"],base+c["end"],c["value"],0.985,"expected_type_response_ifsc",canonical=c["canonical"],expected_type_state=True,ownership_strength=4)
+        return None
+    if kind=="ADDRESS":
+        s=marker.end()
+        while s<len(sentence) and sentence[s] in " ,:-": s+=1
+        span=_bounded_address_after(sentence,s,150)
+        if span:
+            lo,hi=span; body=sentence[lo:hi]
+            if _address_structure_score(body)>=3:
+                return _raw_item("ADDRESS",sent_start+lo,sent_start+hi,body,0.96,"expected_type_response_address",expected_type_state=True,ownership_strength=4)
+    return None
+
+
+def _find_expected_state_candidates(text: str) -> list[dict]:
+    spans=_sentence_spans(text)
+    out=[]
+    for i in range(1,len(spans)):
+        p0,p1=spans[i-1]; s0,s1=spans[i]
+        expected=_infer_expected_type(text[p0:p1])
+        if not expected: continue
+        # TTL is exactly one sentence. If this sentence does not consume the state, it
+        # is not carried any further.
+        item=_expected_response_candidate(expected,text[s0:s1],s0)
+        if item: out.append(item)
+    return out
+
+
+def _annotate_ownership(text: str, items: list[dict]) -> list[dict]:
+    checks={
+        "EMAIL":EMAIL_CONTEXT,"PAN":PAN_CONTEXT,"IFSC":IFSC_CONTEXT,"UPI":UPI_CONTEXT,
+        "CARD":CARD_CONTEXT,"AADHAAR":AADHAAR_CONTEXT,"PHONE":PHONE_POSITIVE_CONTEXT,
+        "ACCOUNT_NUMBER":ACCOUNT_CONTEXT,"OTP":OTP_CONTEXT,"CVV":CVV_CONTEXT,
+        "PINCODE":PIN_CONTEXT,"DOB":DOB_CONTEXT,"PASSPORT":PASSPORT_CONTEXT,
+        "VOTER_ID":VOTER_CONTEXT,"DRIVING_LICENSE":DL_CONTEXT,
+    }
+    personal_re=re.compile(r"(?i)\b(?:my|mine|our|i\s+(?:am|received|got|have|use)|call\s+me|reach\s+me|contact\s+me)\b")
+    out=[]
+    for src in items:
+        x=dict(src)
+        if "ownership_strength" in x:
+            out.append(x); continue
+        kind=x.get("type","")
+        left=_role_left_context(text,x["start"],120)
+        strength=0
+        pat=checks.get(kind)
+        if pat and pat.search(left):
+            strength=4 if personal_re.search(left) else 3
+        elif kind=="NAME" and x.get("evidence") in {"token_bounded_name_context","self_identification_name"}:
+            strength=4
+        elif kind=="ADDRESS":
+            strength=4 if re.search(r"(?i)\b(?:my|your)\b",left) else 3
+        elif kind in {"PASSWORD","USERNAME","API_KEY","AUTH_TOKEN"}:
+            strength=4
+        x["ownership_strength"]=strength
+        out.append(x)
+    return out
+
+
 # ---------- spoken / normalized candidates ----------
 
 def _spoken_candidates(text: str) -> list[dict]:
@@ -489,11 +697,26 @@ def _spoken_candidates(text: str) -> list[dict]:
             out.append(_raw_item("PAN",c["start"],c["end"],c["value"],0.96,"spoken_pan_normalized",canonical=canonical))
         elif IFSC_CONTEXT.search(ctx) and re.fullmatch(r"[A-Z]{4}0[A-Z0-9]{6}",canonical):
             out.append(_raw_item("IFSC",c["start"],c["end"],c["value"],0.96,"spoken_ifsc_alphanumeric_normalized",canonical=canonical))
+        elif DL_CONTEXT.search(ctx) and re.fullmatch(r"[A-Z]{2}[0-9]{2}(?:(?:19|20)[0-9]{2})?[0-9]{7}",canonical):
+            out.append(_raw_item("DRIVING_LICENSE",c["start"],c["end"],c["value"],0.96,"spoken_driving_license_alphanumeric_normalized",canonical=canonical))
+        elif PASSPORT_CONTEXT.search(ctx) and re.fullmatch(r"[A-Z][1-9][0-9]{6}",canonical):
+            out.append(_raw_item("PASSPORT",c["start"],c["end"],c["value"],0.96,"spoken_passport_normalized",canonical=canonical))
     for c in find_spoken_email_candidates(text):
         ctx=_role_left_context(text,c["start"],88)
         domain=c["canonical"].rsplit("@",1)[-1]
         if EMAIL_CONTEXT.search(ctx) or domain.split(".",1)[0] in {"gmail","yahoo","outlook","hotmail","protonmail","icloud"}:
             out.append(_raw_item("EMAIL",c["start"],c["end"],c["value"],0.95,c["evidence"],canonical=c["canonical"]))
+    for c in find_spoken_handle_candidates(text):
+        ctx=_role_left_context(text,c["start"],90)
+        provider=c["canonical"].rsplit("@",1)[-1]
+        if UPI_CONTEXT.search(ctx) and (provider in UPI_HANDLES or len(provider)>=2):
+            out.append(_raw_item("UPI",c["start"],c["end"],c["value"],0.96,"spoken_upi_normalized",canonical=c["canonical"]))
+    for c in find_spoken_date_candidates(text):
+        if DOB_CONTEXT.search(_role_left_context(text,c["start"],100)):
+            out.append(_raw_item("DOB",c["start"],c["end"],c["value"],0.96,"spoken_dob_normalized",canonical=c["canonical"]))
+    for c in find_spoken_driving_license_candidates(text):
+        if DL_CONTEXT.search(_role_left_context(text,c["start"],110)):
+            out.append(_raw_item("DRIVING_LICENSE",c["start"],c["end"],c["value"],0.96,"spoken_driving_license_normalized",canonical=c["canonical"]))
     for c in find_spoken_digit_runs(text):
         digits=c["digits"]; ctx=_role_left_context(text,c["start"],90)
         kind=conf=evidence=None
@@ -698,12 +921,15 @@ def detect_pii(
     found.extend(_find_address_candidates(text))
     found.extend(_find_credential_candidates(text))
     found.extend(_spoken_candidates(text))
+    found.extend(_find_expected_state_candidates(text))
 
-    # v4.6 architecture: candidate -> validator -> occurrence context/veto -> optional AI
-    # -> conflict resolver. Hard negative context runs before AI for speed and precision.
+    # v4.7 architecture: field-clause segmentation -> candidate -> validator ->
+    # occurrence/discourse ownership -> context veto -> optional AI -> ownership-weighted
+    # conflict resolver. Hard negative context runs before AI for speed and precision.
     found=_apply_occurrence_context_policy(text,found)
     reviewed=_fuse_ner_many(text,found,use_ner)
     reviewed=_fuse_semantic_many(text,reviewed,use_semantic)
+    reviewed=_annotate_ownership(text,reviewed)
     return _resolve_conflicts(x for x in reviewed if x["confidence"]>=min_confidence)
 
 
