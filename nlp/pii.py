@@ -1,4 +1,4 @@
-"""Privacy-first PII detection for financial-call transcripts (v4.7).
+"""Privacy-first PII detection for financial-call transcripts (v4.8).
 
 Pipeline:
 ASR text -> ASR-aware normalization candidates -> deterministic validators -> optional
@@ -139,6 +139,19 @@ IFSC_CONTEXT = re.compile(r"(?i)\b(?:ifsc|bank\s+ifsc|branch\s+ifsc)(?:\s+code)?
 EMAIL_CONTEXT = re.compile(r"(?i)\b(?:email|e-mail|mail\s+id|email\s+address|registered\s+mail)\b")
 PAN_CONTEXT = re.compile(r"(?i)\b(?:pan|permanent\s+account\s+number)(?:\s+(?:number|no\.?|card))?\b")
 
+# Public/geographic postal-code language. A six-digit PIN is not inherently personal:
+# it becomes privacy-sensitive when owned by a person/address/delivery context. These
+# cues therefore veto a standalone PIN candidate only when explicit personal ownership
+# is absent.
+_PUBLIC_GEO_CONTEXT = re.compile(
+    r"(?i)\b(?:covers?\s+(?:part\s+of|the\s+area|this\s+area)|postal\s+(?:region|area|zone)|"
+    r"postcode\s+(?:for|of)\s+(?:the\s+)?(?:city|town|district|locality|area)|"
+    r"pin\s*code\s+(?:for|of)\s+(?:the\s+)?(?:city|town|district|locality|area)|"
+    r"(?:city|town|district|locality|area)\s+(?:uses|has|is\s+covered\s+by)\s+(?:the\s+)?(?:pin\s*code|postal\s+code)|"
+    r"belongs?\s+to\s+(?:the\s+)?(?:postal\s+)?(?:region|area|zone)|"
+    r"public\s+(?:postal|pin)\s+(?:code|region))\b"
+)
+
 # Hard-negative discourse signals. They are evaluated on the current occurrence's
 # clause, never cached by literal value. This allows the same token to be private in
 # one sentence and harmless in a documentation/reference sentence.
@@ -174,7 +187,8 @@ _FIELD_LABEL_CORE = (
     r"passport(?:\s+number)?|voter\s+id|driving\s+licen[cs]e(?:\s+number)?|card(?:\s+number)?|address)"
 )
 _FIELD_SPLIT = re.compile(
-    rf"(?i)(?:,\s*|\band\s+)(?=(?:(?:my|your|the)\s+)?{_FIELD_LABEL_CORE}\b)"
+    rf"(?i)(?:,\s*|\band\s+)(?=(?:(?:my|your|the)\s+)?"
+    rf"(?:(?:alternate|secondary|backup|other|primary|registered)\s+)?{_FIELD_LABEL_CORE}\b)"
 )
 ADDRESS_HINT = re.compile(
     r"(?i)(?:\d|\b(?:road|rd|street|st|lane|sector|nagar|colony|apartment|apt|flat|house|village|district|block|phase|floor|near|opp(?:osite)?|building)\b)"
@@ -288,12 +302,19 @@ def _apply_occurrence_context_policy(text: str, items: list[dict]) -> list[dict]
         explicit=_explicit_owner_for_type(kind,left)
         hard_example=bool(_EXAMPLE_CONTEXT.search(clause))
         role_reference=bool(_REFERENCE_ROLE_CONTEXT.search(left))
+        public_geo=kind=="PINCODE" and bool(_PUBLIC_GEO_CONTEXT.search(clause))
 
         if kind not in {"PASSWORD","USERNAME","API_KEY","AUTH_TOKEN"}:
             if hard_example and not explicit:
                 item["confidence"]=min(float(item["confidence"]),0.25)
                 item["decision_method"]="context_veto"
                 item["evidence"]=item.get("evidence","")+"+example_veto"
+                item.pop("ai_review",None)
+                item.pop("ner_review",None)
+            elif public_geo and not explicit:
+                item["confidence"]=min(float(item["confidence"]),0.22)
+                item["decision_method"]="context_veto"
+                item["evidence"]=item.get("evidence","")+"+public_geo_veto"
                 item.pop("ai_review",None)
                 item.pop("ner_review",None)
             elif role_reference and kind in {"PAN","IFSC","AADHAAR","CARD","EMAIL","UPI","PHONE","PINCODE"} and not explicit:
@@ -395,13 +416,28 @@ _ADDRESS_LABEL = re.compile(
     r"address\s*(?:(?:is|:|=)\s*)?"
 )
 _ADDRESS_NEXT_FIELD = re.compile(
-    r"(?i)\s+(?:and\s+)?(?:my\s+|the\s+)?(?:phone|mobile|email|e-mail|pan|ifsc|account|a/c|otp|cvv|upi|dob|date\s+of\s+birth)\b"
+    r"(?i)(?:,\s*|\s+)(?:and\s+)?(?:(?:my|your|the)\s+)?"
+    r"(?:(?:alternate|secondary|backup|other|primary|registered)\s+)?"
+    r"(?:phone|mobile|contact|email|e-mail|pan|ifsc|account|a/c|otp|cvv|upi|dob|date\s+of\s+birth|"
+    r"passport|voter\s+id|driving\s+licen[cs]e|card)\b"
 )
 _RESIDENTIAL_PREFIX = re.compile(r"(?i)\b(?:i\s+(?:live|reside|stay)\s+(?:at|in)|my\s+residence\s+is)\s+")
 _DELIVERY_PREFIX = re.compile(r"(?i)\b(?:send|deliver|ship|courier)\s+(?:(?:the|my|this)\s+)?(?:package|parcel|document|statement|card|item|order)?\s*(?:to|at)\s+")
 _ADDRESS_LABEL_NEGATIVE_PREFIX = re.compile(r"(?i)(?:postal|pin|zip)\s+code\s+for\s+(?:my\s+)?$")
 _ADDRESS_LOCATION_WORD = re.compile(r"(?i)\b(?:road|rd\.?|street|st\.?|lane|sector|nagar|colony|apartment|apartments|apt|flat|house|village|district|block|phase|floor|building|avenue|cross\s+road|extension)\b")
 _ADDRESS_POSTCODE = re.compile(r"(?<!\d)[1-9]\d{5}(?!\d)")
+
+# Ownership-gated partial financial identifiers. Four digits alone are far too
+# ambiguous, so these patterns require an explicit personal card/account ownership
+# phrase and a partial-identifier construction such as "ends with" or "last four".
+_PARTIAL_CARD_PATTERNS = (
+    re.compile(r"(?i)\b(?:my|our)\s+(?:(?:credit|debit)\s+)?card\s+(?:ends?|ending)\s+(?:with|in)\s*[:=-]?\s*(?P<value>\d{4})\b"),
+    re.compile(r"(?i)\b(?:the\s+)?last\s+(?:four|4)\s+digits?\s+of\s+(?:my|our)\s+(?:(?:credit|debit)\s+)?card\s+(?:are|is|:)\s*(?P<value>\d{4})\b"),
+)
+_PARTIAL_ACCOUNT_PATTERNS = (
+    re.compile(r"(?i)\b(?:my|our)\s+(?:(?:bank|loan)\s+)?account\s+(?:ends?|ending)\s+(?:with|in)\s*[:=-]?\s*(?P<value>\d{4})\b"),
+    re.compile(r"(?i)\b(?:the\s+)?last\s+(?:four|4)\s+digits?\s+of\s+(?:my|our)\s+(?:(?:bank|loan)\s+)?account\s+(?:are|is|:)\s*(?P<value>\d{4})\b"),
+)
 
 
 def _address_structure_score(body: str) -> int:
@@ -463,6 +499,26 @@ def _find_address_candidates(text: str) -> list[dict]:
         s,e=span; body=text[s:e]
         if len(body)>=8 and _address_structure_score(body)>=4:
             out.append(_raw_item("ADDRESS",s,e,body,0.94,"delivery_destination_address",ner_review=True))
+    return out
+
+
+def _find_partial_identifier_candidates(text: str) -> list[dict]:
+    """Detect only explicitly owned last-four card/account references.
+
+    The returned source span is the four digits themselves so surrounding prose stays
+    readable. `partial_identifier=True` also forces full hiding even if the caller asks
+    for partial-mask mode; revealing the suffix would otherwise reveal the entire value.
+    """
+    out=[]
+    for kind, patterns in (("CARD", _PARTIAL_CARD_PATTERNS), ("ACCOUNT_NUMBER", _PARTIAL_ACCOUNT_PATTERNS)):
+        for pat in patterns:
+            for m in pat.finditer(text):
+                s,e=m.span("value")
+                out.append(_raw_item(
+                    kind,s,e,m.group("value"),0.995,
+                    "owned_partial_card_last4" if kind=="CARD" else "owned_partial_account_last4",
+                    partial_identifier=True,ownership_strength=4,
+                ))
     return out
 
 
@@ -919,11 +975,12 @@ def detect_pii(
 
     found.extend(_find_name_candidates(text))
     found.extend(_find_address_candidates(text))
+    found.extend(_find_partial_identifier_candidates(text))
     found.extend(_find_credential_candidates(text))
     found.extend(_spoken_candidates(text))
     found.extend(_find_expected_state_candidates(text))
 
-    # v4.7 architecture: field-clause segmentation -> candidate -> validator ->
+    # v4.8 architecture: field-clause segmentation -> candidate -> validator ->
     # occurrence/discourse ownership -> context veto -> optional AI -> ownership-weighted
     # conflict resolver. Hard negative context runs before AI for speed and precision.
     found=_apply_occurrence_context_policy(text,found)
@@ -954,7 +1011,12 @@ def _partial_mask(kind: str, value: str) -> str:
 def mask_pii(text: str, entities: Iterable[dict], mode: str="full") -> str:
     masked=text
     for e in sorted(entities,key=lambda x:x["start"],reverse=True):
-        repl=_partial_mask(e["type"],e.get("value","")) if mode=="partial" else f"[{e['type']} REDACTED]"
+        # A last-four candidate contains only the four sensitive digits. Partial mode
+        # must therefore not reveal its suffix again.
+        if mode=="partial" and not e.get("partial_identifier"):
+            repl=_partial_mask(e["type"],e.get("value",""))
+        else:
+            repl=f"[{e['type']} REDACTED]"
         masked=masked[:e["start"]]+repl+masked[e["end"]:]
     return masked
 
@@ -969,6 +1031,6 @@ def public_pii_metadata(entities: Iterable[dict], reveal_suffix: bool=False) -> 
             "ner_support":e.get("ner_support"),"ner_method":e.get("ner_method"),
             "token_ids":e.get("token_ids"),"alignment_method":e.get("alignment_method"),
             "alignment_confidence":e.get("alignment_confidence"),
-            "masked_value":_partial_mask(e["type"],e.get("value","")) if reveal_suffix else f"[{e['type']} REDACTED]",
+            "masked_value":(_partial_mask(e["type"],e.get("value","")) if reveal_suffix and not e.get("partial_identifier") else f"[{e['type']} REDACTED]"),
         })
     return out

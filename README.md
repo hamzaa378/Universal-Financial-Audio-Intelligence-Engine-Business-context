@@ -1,6 +1,6 @@
-# Universal Financial Audio Intelligence Engine — v4.7 Context-Recall Privacy Hybrid
+# Universal Financial Audio Intelligence Engine — v4.8 Precision-Guard Privacy Hybrid
 
-v4.7 keeps the v4.6 occurrence-aware precision layer and adds field-clause segmentation, one-sentence discourse ownership, ownership-weighted conflict resolution, and stronger spoken identifier normalization. The goal is to recover difficult true PII without giving up the false-positive reductions from v4.6.
+v4.8 keeps the v4.7 context-recall architecture and adds three focused precision controls: a public-geography veto for standalone PIN codes, stricter ADDRESS end boundaries at new field labels, and ownership-gated protection of partial card/account identifiers such as the last four digits. The goal is to improve masking accuracy without reopening broad numeric false positives.
 
 ## Processing architecture
 
@@ -33,6 +33,16 @@ Audio / microphone
 ```
 
 
+## v4.8 precision-guard improvements
+
+- **PUBLIC_GEO_CONTEXT veto for PIN codes:** public postal-region statements such as `The postal code 411001 covers part of Pune.` remain visible, while personal forms such as `My PIN code is 411045.` and `The postal code for my address is 110016.` still mask.
+- **Stricter ADDRESS end boundaries:** ADDRESS capture now stops before new fields introduced with modifiers such as `alternate`, `secondary`, `backup`, `other`, `primary`, and `registered`.
+- **Field-clause segmentation also understands those modifiers**, preventing a later email/phone field from contaminating the context decision for an earlier address.
+- **Ownership-gated partial financial identifiers:** explicit phrases such as `My card ends with 1111` and `The last four digits of my account are 9012` now protect only the four digits. Unowned look-alikes such as payment amounts, reference numbers, or test-card statements remain visible.
+- Partial-identifier candidates are fully hidden even when the global output mode is `partial`, because revealing their suffix would reveal the entire sensitive value.
+
+See `V4_8_CHANGES.md` for implementation details and `LIMITATIONS_V4_8.md` for known limitations, possible remedies, implementation difficulty, and trade-offs.
+
 ## v4.7 context-recall improvements
 
 - Long multi-PII sentences are segmented at field transitions before semantic/context decisions, preventing one field from contaminating another.
@@ -55,7 +65,7 @@ Audio / microphone
 - NATO/phonetic-alphabet PAN and IFSC dictation is normalized under explicit PAN/IFSC context.
 - Transaction/ticket/complaint/customer/application identifiers are still available, but their separate operational-ID layer is disabled by default to reduce false positives.
 
-See `V4_7_CHANGES.md` for the new recall architecture and `V4_6_CHANGES.md` for the precision-layer rationale.
+See `V4_8_CHANGES.md` for the focused precision changes, `V4_7_CHANGES.md` for the recall architecture, and `V4_6_CHANGES.md` for the occurrence-aware precision-layer rationale.
 
 ## IFSC robustness
 
@@ -157,7 +167,7 @@ Diarization             OFF unless needed
 run_privacy_benchmark.bat
 ```
 
-The bundled synthetic regression suites are for development regression only. They are not production-accuracy claims. v4.7 retains `benchmarks\context_precision_v46.jsonl` and adds `benchmarks\context_recall_v47.jsonl` for field segmentation, one-sentence discourse ownership, ownership conflicts, spoken DOB/UPI/passport/driving-licence values, and full/registered names.
+The bundled synthetic regression suites are for development regression only. They are not production-accuracy claims. v4.8 retains the v4.6/v4.7 suites and adds `benchmarks\precision_guard_v48.jsonl` for public-vs-personal PIN codes, ADDRESS field boundaries, and ownership-gated card/account last-four masking.
 
 ## Real audio manifest benchmark
 
