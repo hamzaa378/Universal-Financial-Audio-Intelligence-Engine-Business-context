@@ -126,7 +126,7 @@ def analyze_text(
     mask_mode: str="full",
     mask_types=None,
     profanity_enabled: bool=True,
-    financial_ids_enabled: bool=True,
+    financial_ids_enabled: bool=False,
     include_internal: bool=False,
 ) -> dict:
     """Optimized text-only path.
@@ -196,7 +196,7 @@ def run_pipeline(
     mask_mode="full",
     mask_types=None,
     profanity_enabled=True,
-    financial_ids_enabled=True,
+    financial_ids_enabled=False,
     create_audio_output=False,
     audio_redaction_method="beep",
     asr_speed_mode="balanced",

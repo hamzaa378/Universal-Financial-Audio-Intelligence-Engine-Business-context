@@ -4,7 +4,7 @@ from pipeline import run_pipeline
 
 
 def main():
-    p=argparse.ArgumentParser(description="Universal Financial Audio Intelligence Engine v4.5")
+    p=argparse.ArgumentParser(description="Universal Financial Audio Intelligence Engine v4.6")
     p.add_argument("audio",help="Audio/video file")
     p.add_argument("--model",default=None,help="Whisper model, e.g. small, medium, large-v3")
     p.add_argument("--speed",choices=["fast","balanced","accuracy"],default="fast")
@@ -14,7 +14,9 @@ def main():
     p.add_argument("--ner-ai",action="store_true",help="Enable optional ONNX token NER second opinion")
     p.add_argument("--partial-mask",action="store_true")
     p.add_argument("--no-profanity-filter",action="store_true")
-    p.add_argument("--no-financial-id-mask",action="store_true")
+    p.add_argument("--financial-id-mask",dest="financial_id_mask",action="store_true",help="Opt in to masking transaction/customer/application/ticket IDs in addition to core PII")
+    p.add_argument("--no-financial-id-mask",dest="financial_id_mask",action="store_false",help=argparse.SUPPRESS)
+    p.set_defaults(financial_id_mask=False)
     p.add_argument("--diarization",action="store_true")
     p.add_argument("--protected-audio",action="store_true")
     p.add_argument("--include-raw",action="store_true",help="Debug only: include raw transcript")
@@ -24,7 +26,7 @@ def main():
         privacy_profile=a.privacy_profile,use_semantic_ai=a.semantic_ai,use_ner_ai=a.ner_ai,
         mask_mode="partial" if a.partial_mask else "full",
         profanity_enabled=not a.no_profanity_filter,
-        financial_ids_enabled=not a.no_financial_id_mask,
+        financial_ids_enabled=a.financial_id_mask,
         create_audio_output=a.protected_audio,
         asr_speed_mode=a.speed,
         enable_diarization=a.diarization,

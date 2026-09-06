@@ -12,7 +12,7 @@ from asr.fintech_asr import warmup_model, backend_status
 from decision_ai.warmup import warmup_semantic_ai
 from decision_ai.startup import verify_startup
 
-PII_TYPES=["EMAIL","PHONE","PAN","IFSC","UPI","CARD","AADHAAR","ACCOUNT_NUMBER","OTP","CVV","PINCODE","DOB","NAME","ADDRESS","PASSPORT","VOTER_ID","DRIVING_LICENSE"]
+PII_TYPES=["EMAIL","PHONE","PAN","IFSC","UPI","CARD","AADHAAR","ACCOUNT_NUMBER","OTP","CVV","PINCODE","DOB","NAME","ADDRESS","PASSPORT","VOTER_ID","DRIVING_LICENSE","PASSWORD","USERNAME","API_KEY","AUTH_TOKEN"]
 
 st.set_page_config(page_title="Financial Audio Intelligence", page_icon="🎙️", layout="wide")
 st.title("Universal Financial Audio Intelligence Engine")
@@ -37,10 +37,10 @@ with st.sidebar:
         help="Uses pyannote when requirements-ai.txt and HF_TOKEN are configured. The model is cached after first load."
     )
     financial_ids_enabled=st.toggle(
-        "Hide sensitive financial IDs", value=True,
-        help="Masks transaction, loan, customer, application and complaint/reference IDs separately from PII."
+        "Hide operational/customer IDs", value=False,
+        help="Optional. Masks transaction, loan, customer, application and complaint/ticket IDs separately from core PII. Disabled by default to reduce false positives."
     )
-    mask_types=set(st.multiselect("PII types to hide", PII_TYPES, default=PII_TYPES))
+    mask_types=set(st.multiselect("Privacy types to hide", PII_TYPES, default=PII_TYPES))
     whisper_model=st.selectbox("Whisper model", ["small","medium","large-v3"], index=0)
     speed_label=st.selectbox(
         "ASR processing mode",

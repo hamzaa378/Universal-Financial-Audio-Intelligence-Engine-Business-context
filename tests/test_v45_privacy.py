@@ -33,7 +33,13 @@ class V45PrivacyTests(unittest.TestCase):
 
     def test_spoken_digits_with_asr_punctuation(self):
         t='My mobile number is nine, eight, seven, six, five, four, three, two, one, zero.'
-        self.assertTrue(any(x['type']=='PHONE' for x in detect_pii(t)))
+        hit=next(x for x in detect_pii(t) if x['type']=='PHONE')
+        self.assertEqual(hit.get('canonical'),'9876543210')
+
+    def test_spoken_country_code_phone(self):
+        t='My mobile number is plus nine one, nine eight seven six, five four three two one zero.'
+        hit=next(x for x in detect_pii(t) if x['type']=='PHONE')
+        self.assertEqual(hit.get('canonical'),'919876543210')
 
     def test_spoken_ifsc(self):
         t='My IFSC is ABCD zero one two three four five six.'

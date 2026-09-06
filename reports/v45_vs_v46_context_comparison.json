@@ -1,0 +1,21 @@
+{
+  "note": "Synthetic regression benchmark built around Benchmark 2 failure modes; not a production accuracy claim.",
+  "v4_5": {
+    "tp": 6,
+    "fp": 6,
+    "fn": 10,
+    "precision": 0.5,
+    "recall": 0.375,
+    "f1": 0.42857142857142855,
+    "negative_case_false_positive_rate": 0.35714285714285715
+  },
+  "v4_6": {
+    "tp": 16,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "negative_case_false_positive_rate": 0.0
+  }
+}

@@ -12,35 +12,42 @@ if errorlevel 1 (
 if not exist reports mkdir reports
 
 echo ============================================================
-echo 1/5 Functional unit tests
+echo 1/6 Functional unit tests
 echo ============================================================
 %PYTHON% -m unittest discover -s tests -p "test_*.py" -v
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 2/5 PII + profanity accuracy, FPR and deterministic speed
+echo 2/6 PII + profanity accuracy, FPR and deterministic speed
 echo ============================================================
 %PYTHON% tools\evaluate_privacy.py --iterations 200 --json reports\privacy_benchmark.json --csv reports\privacy_cases.csv
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 3/5 Sensitive financial identifier regression
+echo 3/6 v4.6 context/false-positive stress benchmark
+echo ============================================================
+%PYTHON% tools\evaluate_privacy.py --pii benchmarks\context_precision_v46.jsonl --iterations 200 --json reports\context_precision_v46.json --csv reports\context_precision_v46.csv
+if errorlevel 1 goto :fail
+
+echo.
+echo ============================================================
+echo 4/6 Sensitive financial identifier regression
 echo ============================================================
 %PYTHON% tools\evaluate_sensitive_ids.py
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 4/5 Optional batched semantic-AI privacy stress test
+echo 5/6 Optional batched semantic-AI privacy stress test
 echo ============================================================
 %PYTHON% tools\evaluate_semantic_privacy.py
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 5/5 Optional full audio / GPU ASR benchmark
+echo 6/6 Optional full audio / GPU ASR benchmark
 echo ============================================================
 if "%~1"=="" (
   echo Skipped. To benchmark custom audio, run:
@@ -58,7 +65,7 @@ if errorlevel 1 goto :fail
 
 :success
 echo.
-echo [PASS] v4.5 benchmark completed. Open the reports folder for JSON/CSV results.
+echo [PASS] v4.6 benchmark completed. Open the reports folder for JSON/CSV results.
 pause
 exit /b 0
 

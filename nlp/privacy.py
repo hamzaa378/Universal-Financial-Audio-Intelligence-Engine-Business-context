@@ -22,7 +22,7 @@ def protect_text(
     use_ner: bool = False,
     mask_types: set[str] | None = None,
     profanity_enabled: bool = True,
-    financial_ids_enabled: bool = True,
+    financial_ids_enabled: bool = False,
 ) -> dict:
     threshold=PROFILE_THRESHOLDS.get(privacy_profile,PROFILE_THRESHOLDS["balanced"])
     pii=detect_pii(text,min_confidence=threshold,use_semantic=use_semantic,use_ner=use_ner)

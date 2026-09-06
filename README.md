@@ -1,6 +1,6 @@
-# Universal Financial Audio Intelligence Engine — v4.5 Privacy-First GPU Hybrid
+# Universal Financial Audio Intelligence Engine — v4.6 Occurrence-Aware Privacy Hybrid
 
-v4.5 keeps strict CUDA/FP16 Faster-Whisper from v4.4 and hardens the privacy path around the failure modes that matter most in real calls: ASR punctuation/format variation, spoken identifiers, name/address overcapture, and character-to-audio alignment.
+v4.6 keeps the v4.5 GPU/audio privacy path and adds an occurrence-aware decision layer aimed specifically at reducing contextual false positives while improving masking recall. A validator now proves identifier shape; a separate ownership/context stage decides whether that exact occurrence should be hidden.
 
 ## Processing architecture
 
@@ -16,14 +16,33 @@ Audio / microphone
        - separator-normalized IFSC
        - natural-language dates
   -> deterministic privacy candidates / validators
+  -> occurrence-specific ownership + role context
+  -> example/document/reference veto
   -> optional token NER support for ambiguous clauses
-  -> optional semantic privacy judge
+  -> optional semantic privacy judge using local grammatical role
   -> conflict resolver
   -> token-owned PII/profanity entities
   -> protected transcript + token-time audio redaction
   -> financial entities / intent / obligations / regulatory screening
   -> Streamlit review UI
 ```
+
+
+## v4.6 context-precision improvements
+
+- Identical values are classified independently per occurrence; a DOB/phone role is never cached by literal value.
+- Documentation, sample, tutorial, test-value, source-code and reference roles can veto valid-looking PII when ownership is absent.
+- Example detection analyzes the surrounding clause with the candidate removed, avoiding self-vetoes such as `example.com`.
+- Implicit phone ownership now covers `his/her number`, named contact phrases, and `for future contact`.
+- Delivery destinations can become ADDRESS candidates without requiring the word `address`.
+- ADDRESS capture stops before contrastive clauses such as `, but ...`.
+- Added context-gated PASSWORD, USERNAME, API_KEY and AUTH_TOKEN masking with placeholder suppression.
+- Hard-coded `*_API_KEY=...` / `*_TOKEN=...` assignments are protected when the value is real-looking, while placeholders remain visible.
+- Spoken `+91` numbers and parenthesized phone formatting are supported; spoken digit normalization now distinguishes `one` from the ASR variant `o` correctly.
+- NATO/phonetic-alphabet PAN and IFSC dictation is normalized under explicit PAN/IFSC context.
+- Transaction/ticket/complaint/customer/application identifiers are still available, but their separate operational-ID layer is disabled by default to reduce false positives.
+
+See `V4_6_CHANGES.md` for the detailed rationale and regression cases.
 
 ## IFSC robustness
 
@@ -86,9 +105,9 @@ install_ner_ai.bat
 
 Then enable **Token NER second opinion** in the frontend and click **Warm up & verify AI**.
 
-The bundled default ONNX model is supporting evidence only; deterministic validators remain authoritative for PAN, IFSC, Luhn-valid cards, Aadhaar checks/context, and other strong structures. The default model is not treated as a Hindi/Hinglish production NER model.
+The bundled default ONNX model is supporting evidence only; deterministic validators remain authoritative for identifier shape/checks, while the occurrence-context layer decides whether that valid shape is actually private in the current clause. The default model is not treated as a Hindi/Hinglish production NER model.
 
-## v4.5 privacy improvements
+## v4.5 privacy improvements retained
 
 - IFSC separator normalization with false-positive guardrails.
 - Spoken IFSC recognition for digit-by-digit branch codes.
@@ -111,7 +130,7 @@ Detection profile       Balanced hybrid
 Semantic AI             ON
 Token NER               OFF initially, then ON after install_ner_ai.bat
 Full PII redaction      ON
-Sensitive financial IDs ON
+Operational/customer IDs OFF by default
 Profanity reduction     ON
 Whisper                 small + Fast demo while debugging
                          medium + Balanced for stronger accuracy
@@ -125,7 +144,7 @@ Diarization             OFF unless needed
 run_privacy_benchmark.bat
 ```
 
-The bundled synthetic regression suite is for development regression only. It is not a production-accuracy claim.
+The bundled synthetic regression suite is for development regression only. It is not a production-accuracy claim. v4.6 also runs `benchmarks\context_precision_v46.jsonl`, which specifically covers documentation/examples, same-value role changes, implicit phone ownership, delivery addresses, self-identification, and credentials.
 
 ## Real audio manifest benchmark
 

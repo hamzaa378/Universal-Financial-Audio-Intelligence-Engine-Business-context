@@ -18,6 +18,7 @@ from nlp.normalization import (
     find_ifsc_candidates,
     find_spoken_email_candidates,
     find_spoken_digit_runs,
+    find_spoken_alnum_runs,
     find_natural_date_candidates,
 )
 
@@ -71,7 +72,12 @@ def verhoeff_valid(value: str) -> bool:
 # ---------- patterns and context ----------
 _EMAIL = re.compile(r"(?i)(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w-])")
 _PAN = re.compile(r"(?i)\b[A-Z]{5}[0-9]{4}[A-Z]\b")
-_PHONE = re.compile(r"(?<!\d)(?:(?:\+?91|0)[\s.-]?)?[6-9](?:[\s.-]?\d){9}(?!\d)")
+_PHONE = re.compile(
+    r"(?<!\d)(?:(?:\+?91|0)[\s.-]?)?(?:"
+    r"[6-9](?:[\s.-]?\d){9}|"
+    r"\([6-9]\d{4}\)[\s.-]?\d{5}"
+    r")(?!\d)"
+)
 _AADHAAR = re.compile(r"(?<!\d)[2-9]\d{3}[ -]?\d{4}[ -]?\d{4}(?!\d)")
 _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 _UPI = re.compile(r"(?i)(?<![\w.+-])[A-Z0-9._-]{2,64}@[A-Z][A-Z0-9_-]{1,31}(?![A-Z0-9_-])")
@@ -84,6 +90,22 @@ _PASSPORT = re.compile(r"(?i)\b[A-Z][1-9][0-9]{6}\b")
 _VOTER_ID = re.compile(r"(?i)\b[A-Z]{3}[0-9]{7}\b")
 _DRIVING_LICENSE = re.compile(r"(?i)\b[A-Z]{2}[ -]?[0-9]{2}[ -]?(?:(?:19|20)[0-9]{2}[ -]?)?[0-9]{7}\b")
 
+# Explicitly assigned credentials/secrets. These are deliberately context-gated:
+# random high-entropy strings are never masked merely because they look unusual.
+_CREDENTIAL_ASSIGN = re.compile(
+    r'''(?ix)\b(?P<label>password|passcode|username|user\s*name|api[ _-]*key|access[ _-]*token|auth(?:entication)?[ _-]*token|github[ _-]*token)
+        \s*(?:is|:|=)\s*["']?(?P<value>[^\s,"';]{3,160})'''
+)
+_AUTH_USE_TOKEN = re.compile(
+    r'''(?ix)\b(?:please\s+)?(?:use|provide|send|authenticate\s+with)\s+(?:the\s+)?
+        (?P<label>token|api[ _-]*key|access[ _-]*token)\s+["']?(?P<value>[A-Za-z0-9][A-Za-z0-9._~+\-/=]{11,160})'''
+)
+_ENV_SECRET_ASSIGN = re.compile(
+    r'''(?x)\b(?P<label>(?:[A-Za-z0-9]+_)*(?:API_KEY|SECRET_KEY|ACCESS_TOKEN|AUTH_TOKEN|TOKEN|PASSWORD))
+        \s*=\s*["']?(?P<value>[^\s,"';]{3,200})''',
+    re.I,
+)
+
 UPI_HANDLES = {
     "upi", "ybl", "ibl", "axl", "paytm", "okaxis", "okhdfcbank", "okicici",
     "oksbi", "okyesbank", "apl", "airtel", "freecharge", "pingpay", "waicici",
@@ -92,7 +114,13 @@ UPI_HANDLES = {
 PHONE_NEGATIVE_CONTEXT = re.compile(
     r"(?i)\b(?:order|transaction|txn|reference|ref|loan|customer|application|invoice|ticket|case|employee|tracking|token|request|complaint)\s*(?:id|number|no\.?|#)?(?:\s+is)?\s*[:=-]?\s*$"
 )
-PHONE_POSITIVE_CONTEXT = re.compile(r"(?i)\b(?:phone|mobile|contact|call(?:\s+me)?|whatsapp|telephone|reach\s+me|ring\s+me|number\s+to\s+reach)\b")
+PHONE_POSITIVE_CONTEXT = re.compile(
+    r"(?i)\b(?:phone|mobile|contact|whatsapp|telephone|number\s+to\s+reach|"
+    r"call(?:\s+(?:me|him|her|them|[A-Z][A-Za-z.'-]*))?|"
+    r"reach(?:\s+(?:me|him|her|them|[A-Z][A-Za-z.'-]*))?|ring\s+me|"
+    r"(?:my|your|his|her|their|customer'?s|client'?s|borrower'?s)\s+(?:phone\s+|mobile\s+|contact\s+)?number)\b"
+)
+PHONE_FOLLOWING_CONTEXT = re.compile(r"(?i)\b(?:for\s+(?:future\s+)?contact|for\s+contact|as\s+(?:my|his|her|their)\s+(?:phone|mobile|contact)\s+number)\b")
 ACCOUNT_CONTEXT = re.compile(r"(?i)\b(?:account|a/c|acct|loan\s+account|bank\s+account)\s*(?:number|no\.?|#)?\b")
 OTP_CONTEXT = re.compile(r"(?i)\b(?:otp|one[- ]time\s+(?:password|passcode)|verification\s+code|security\s+code|auth(?:entication)?\s+code)\b")
 CVV_CONTEXT = re.compile(r"(?i)\b(?:cvv|cvc|card\s+security\s+code|card\s+verification\s+value)\b")
@@ -106,6 +134,30 @@ CARD_CONTEXT = re.compile(r"(?i)\b(?:card|credit\s+card|debit\s+card|visa|master
 UPI_CONTEXT = re.compile(r"(?i)\b(?:upi|vpa|virtual\s+payment\s+address|pay\s+id)\b")
 IFSC_CONTEXT = re.compile(r"(?i)\b(?:ifsc|bank\s+ifsc|branch\s+ifsc)(?:\s+code)?\b")
 EMAIL_CONTEXT = re.compile(r"(?i)\b(?:email|e-mail|mail\s+id|email\s+address|registered\s+mail)\b")
+PAN_CONTEXT = re.compile(r"(?i)\b(?:pan|permanent\s+account\s+number)(?:\s+(?:number|no\.?|card))?\b")
+
+# Hard-negative discourse signals. They are evaluated on the current occurrence's
+# clause, never cached by literal value. This allows the same token to be private in
+# one sentence and harmless in a documentation/reference sentence.
+_EXAMPLE_CONTEXT = re.compile(
+    r"(?i)\b(?:example|sample|documentation|docs?|tutorial|manual|article|test\s+(?:value|number|data|case)|"
+    r"standard\s+test|literal\s+text|placeholder|template|configuration\s+file|source\s+code|"
+    r"unit[- ]?test|synthetic\s+benchmark|dataset\s+(?:column|example)|training\s+video|"
+    r"demonstrat(?:e|es|ed|ion))\b"
+)
+_REFERENCE_ROLE_CONTEXT = re.compile(
+    r"(?i)\b(?:product\s+serial|serial\s+number|asset\s+code|batch(?:\s+code)?|invoice\s+(?:reference|number)|"
+    r"shipment\s+(?:reference|number)|reference\s+document|document\s+template|page\s+(?:identifier|number)|"
+    r"order\s+(?:id|number)|tracking\s+(?:id|number)|employee\s+(?:id|number))\b"
+)
+_ROLE_RESET = re.compile(
+    r"(?i)(?:\bwhile\b|\bwhereas\b|\bhowever\b|\bbut\b|"
+    r"\band\b(?=\s+(?:(?:the|my|your)\s+)?(?:transaction|txn|complaint|ticket|case|order|reference|employee|"
+    r"application|invoice|tracking|phone|mobile|account|ifsc|pan|email|upi|otp|cvv|address|dob|date\s+of\s+birth)\b)|"
+    r",(?=\s*(?:(?:the|my|your)\s+)?(?:transaction|txn|complaint|ticket|case|order|reference|employee|"
+    r"application(?:\s+deadline)?|invoice|tracking|phone|mobile|account|ifsc|pan|email|upi|otp|cvv|address|dob|"
+    r"date\s+of\s+birth|meeting|report)\b))"
+)
 ADDRESS_HINT = re.compile(
     r"(?i)(?:\d|\b(?:road|rd|street|st|lane|sector|nagar|colony|apartment|apt|flat|house|village|district|block|phase|floor|near|opp(?:osite)?|building)\b)"
 )
@@ -130,6 +182,94 @@ def _clause_bounds(text: str, start: int, end: int, radius: int=180) -> tuple[in
     return lo,hi
 
 
+def _role_left_context(text: str, start: int, radius: int = 96) -> str:
+    """Return the local grammatical role before this exact occurrence.
+
+    Contrastive conjunctions and commas reset ownership. This prevents a role such as
+    DOB/PHONE from leaking to a second identical value later in the same sentence.
+    """
+    left=_left_clause(text,start,radius)
+    cuts=[m.end() for m in _ROLE_RESET.finditer(left)]
+    return left[max(cuts) if cuts else 0:]
+
+
+def _occurrence_clause(text: str, start: int, end: int, radius: int = 150) -> str:
+    lo,hi=_clause_bounds(text,start,end,radius)
+    return text[lo:hi]
+
+
+def _occurrence_context(text: str, start: int, end: int, radius: int = 150) -> str:
+    """Clause context with the candidate removed.
+
+    This prevents candidate content such as `example.com` or a token containing the
+    substring `Example` from triggering documentation/example suppression by itself.
+    """
+    lo,hi=_clause_bounds(text,start,end,radius)
+    return (text[lo:start] + " <VALUE> " + text[end:hi]).strip()
+
+
+def _right_clause(text: str, end: int, radius: int = 72) -> str:
+    hi=min(len(text),end+radius)
+    for sep in (".","!","?","\n",";"):
+        pos=text.find(sep,end,hi)
+        if pos>=0: hi=min(hi,pos)
+    return text[end:hi]
+
+
+def _explicit_owner_for_type(kind: str, left: str) -> bool:
+    checks={
+        "EMAIL":EMAIL_CONTEXT, "PAN":PAN_CONTEXT, "IFSC":IFSC_CONTEXT, "UPI":UPI_CONTEXT,
+        "CARD":CARD_CONTEXT, "AADHAAR":AADHAAR_CONTEXT, "PHONE":PHONE_POSITIVE_CONTEXT,
+        "ACCOUNT_NUMBER":ACCOUNT_CONTEXT, "OTP":OTP_CONTEXT, "CVV":CVV_CONTEXT,
+        "PINCODE":PIN_CONTEXT, "DOB":DOB_CONTEXT, "PASSPORT":PASSPORT_CONTEXT,
+        "VOTER_ID":VOTER_CONTEXT, "DRIVING_LICENSE":DL_CONTEXT,
+    }
+    pat=checks.get(kind)
+    if not (pat and pat.search(left)):
+        return False
+    # A type word alone ("example email", "test card number") is not ownership.
+    personal=bool(re.search(
+        r"(?i)\b(?:my|mine|our|registered\s+(?:phone|mobile|email|address)|call\s+me|reach\s+me|"
+        r"contact\s+me|send\s+(?:it|the\s+refund|the\s+confirmation)\s+to\s+me)\b",
+        left,
+    ))
+    return personal
+
+
+def _apply_occurrence_context_policy(text: str, items: list[dict]) -> list[dict]:
+    """Precision layer between validation and optional AI.
+
+    A validator proves shape, not ownership. Example/document/reference clauses can
+    therefore veto an otherwise valid value unless the same local role explicitly
+    assigns that value to a person/account.
+    """
+    out=[]
+    for src in items:
+        item=dict(src)
+        kind=item.get("type","")
+        left=_role_left_context(text,item["start"],100)
+        clause=_occurrence_context(text,item["start"],item["end"],170)
+        explicit=_explicit_owner_for_type(kind,left)
+        hard_example=bool(_EXAMPLE_CONTEXT.search(clause))
+        role_reference=bool(_REFERENCE_ROLE_CONTEXT.search(left))
+
+        if kind not in {"PASSWORD","USERNAME","API_KEY","AUTH_TOKEN"}:
+            if hard_example and not explicit:
+                item["confidence"]=min(float(item["confidence"]),0.25)
+                item["decision_method"]="context_veto"
+                item["evidence"]=item.get("evidence","")+"+example_veto"
+                item.pop("ai_review",None)
+                item.pop("ner_review",None)
+            elif role_reference and kind in {"PAN","IFSC","AADHAAR","CARD","EMAIL","UPI","PHONE","PINCODE"} and not explicit:
+                item["confidence"]=min(float(item["confidence"]),0.35)
+                item["decision_method"]="context_veto"
+                item["evidence"]=item.get("evidence","")+"+reference_role_veto"
+                item.pop("ai_review",None)
+                item.pop("ner_review",None)
+        out.append(item)
+    return out
+
+
 def _item(kind: str, m: re.Match, confidence: float, evidence: str) -> dict:
     return {
         "type": kind, "start": m.start(), "end": m.end(), "value": m.group(0),
@@ -149,9 +289,9 @@ def _overlaps(a: dict, b: dict) -> bool:
 
 def _resolve_conflicts(items: Iterable[dict]) -> list[dict]:
     priority = {
-        "EMAIL":100,"PAN":99,"IFSC":98,"UPI":97,"AADHAAR":96,"CARD":95,
+        "API_KEY":103,"AUTH_TOKEN":103,"PASSWORD":103,"EMAIL":100,"PAN":99,"IFSC":98,"UPI":97,"AADHAAR":96,"CARD":95,
         "PASSPORT":94,"ADDRESS":93,"VOTER_ID":92,"DRIVING_LICENSE":92,
-        "PHONE":90,"ACCOUNT_NUMBER":85,"DOB":80,"OTP":78,"CVV":77,
+        "PHONE":90,"USERNAME":88,"ACCOUNT_NUMBER":85,"DOB":80,"OTP":78,"CVV":77,
         "PINCODE":75,"NAME":70,
     }
     ranked=sorted(items,key=lambda x:(-x["confidence"],-priority.get(x["type"],0),-(x["end"]-x["start"]),x["start"]))
@@ -162,36 +302,41 @@ def _resolve_conflicts(items: Iterable[dict]) -> list[dict]:
     return sorted(chosen,key=lambda x:(x["start"],x["end"]))
 
 
-# ---------- bounded NAME / ADDRESS extraction ----------
+# ---------- bounded NAME / ADDRESS / SECRET extraction ----------
 _NAME_LABEL = re.compile(r"(?i)\b(?:my\s+name\s+is|(?:customer|applicant|borrower)\s+name\s+is|name\s*[:=])\s+")
-_NAME_STOP = {"and","but","my","your","phone","mobile","email","account","pan","ifsc","otp","address","calling","speaking","from","regarding","about","because","for"}
+_SELF_NAME_LABEL = re.compile(r"(?i)\b(?:i\s+am|i['’]m|this\s+is)\s+")
+_NAME_STOP = {"and","but","my","your","phone","mobile","email","account","pan","ifsc","otp","address","calling","speaking","from","regarding","about","because","for","trying","looking","here","not","available"}
 _NAME_TOKEN = re.compile(r"[A-Za-z][A-Za-z.'-]{0,30}")
+
+
+def _name_after_label(text: str, lo: int, *, require_two: bool=False, self_identification: bool=False) -> dict | None:
+    _,hi=_clause_bounds(text,lo,lo,100)
+    body=text[lo:hi]
+    tokens=[]; end=0
+    for m in re.finditer(r"\S+",body):
+        clean=m.group(0).strip(" ,:;()[]{}")
+        if not clean: continue
+        if clean.casefold() in _NAME_STOP or not _NAME_TOKEN.fullmatch(clean): break
+        tokens.append((m.start(),m.end(),clean)); end=m.end()
+        if len(tokens)>=4: break
+    if not tokens or (require_two and len(tokens)<2): return None
+    # Self-identification is stricter so "I am calling regarding..." is not a NAME.
+    if self_identification and not all(t[2][:1].isupper() for t in tokens): return None
+    s=lo+tokens[0][0]; e=lo+end
+    value=text[s:e].strip(" ,;:"); e=s+len(value)
+    if value.casefold() in {"not available","not disclosed","unknown"}: return None
+    conf=0.94 if not self_identification else 0.91
+    return _raw_item("NAME",s,e,value,conf,"self_identification_name" if self_identification else "token_bounded_name_context",ner_review=True)
 
 
 def _find_name_candidates(text: str) -> list[dict]:
     out=[]
     for label in _NAME_LABEL.finditer(text):
-        lo=label.end(); _,hi=_clause_bounds(text,lo,lo,100)
-        body=text[lo:hi]
-        tokens=[]; end=0
-        for m in re.finditer(r"\S+",body):
-            clean=m.group(0).strip(" ,:;()[]{}")
-            if not clean:
-                continue
-            if clean.casefold() in _NAME_STOP:
-                break
-            if not _NAME_TOKEN.fullmatch(clean):
-                break
-            tokens.append((m.start(),m.end(),clean))
-            end=m.end()
-            if len(tokens)>=4:
-                break
-        if tokens:
-            s=lo+tokens[0][0]; e=lo+end
-            value=text[s:e].strip(" ,;:")
-            e=s+len(value)
-            if value.casefold() not in {"not available","not disclosed","unknown"}:
-                out.append(_raw_item("NAME",s,e,value,0.94,"token_bounded_name_context",ner_review=True))
+        item=_name_after_label(text,label.end())
+        if item: out.append(item)
+    for label in _SELF_NAME_LABEL.finditer(text):
+        item=_name_after_label(text,label.end(),require_two=True,self_identification=True)
+        if item: out.append(item)
     return out
 
 
@@ -200,16 +345,43 @@ _ADDRESS_NEXT_FIELD = re.compile(
     r"(?i)\s+(?:and\s+)?(?:my\s+|the\s+)?(?:phone|mobile|email|e-mail|pan|ifsc|account|a/c|otp|cvv|upi|dob|date\s+of\s+birth)\b"
 )
 _RESIDENTIAL_PREFIX = re.compile(r"(?i)\b(?:i\s+(?:live|reside|stay)\s+(?:at|in)|my\s+residence\s+is)\s+")
+_DELIVERY_PREFIX = re.compile(r"(?i)\b(?:send|deliver|ship|courier)\s+(?:(?:the|my|this)\s+)?(?:package|parcel|document|statement|card|item|order)?\s*(?:to|at)\s+")
+_ADDRESS_LABEL_NEGATIVE_PREFIX = re.compile(r"(?i)(?:postal|pin|zip)\s+code\s+for\s+(?:my\s+)?$")
+_ADDRESS_LOCATION_WORD = re.compile(r"(?i)\b(?:road|rd\.?|street|st\.?|lane|sector|nagar|colony|apartment|apartments|apt|flat|house|village|district|block|phase|floor|building|avenue|cross\s+road|extension)\b")
+_ADDRESS_POSTCODE = re.compile(r"(?<!\d)[1-9]\d{5}(?!\d)")
+
+
+def _address_structure_score(body: str) -> int:
+    score=0
+    if _ADDRESS_LOCATION_WORD.search(body): score+=2
+    if _ADDRESS_POSTCODE.search(body): score+=2
+    if re.search(r"(?i)\b(?:flat|house|apt|apartment|floor|plot)\s*(?:no\.?\s*)?[A-Z0-9/-]+",body): score+=2
+    elif re.search(r"(?<!\w)\d{1,4}[A-Za-z/-]?\b",body): score+=1
+    if body.count(",")>=2: score+=2
+    elif body.count(",")==1: score+=1
+    return score
 
 
 def _bounded_address_after(text: str, start: int, max_len: int=150) -> tuple[int,int] | None:
     hi=min(len(text),start+max_len)
-    # Hard clause boundary first.
-    stops=[p for p in (text.find(c,start,hi) for c in ".!?\n;") if p>=0]
+    # Hard clause boundary first, but do not terminate on common street abbreviations.
+    stops=[]
+    for p in range(start,hi):
+        ch=text[p]
+        if ch in "!?\n;":
+            stops.append(p)
+        elif ch==".":
+            prev=text[max(start,p-6):p]
+            if re.search(r"(?i)\b(?:rd|st|ave|dr|no|apt)$",prev):
+                continue
+            stops.append(p)
     if stops: hi=min(hi,min(stops))
     body=text[start:hi]
     nxt=_ADDRESS_NEXT_FIELD.search(body)
     if nxt: hi=start+nxt.start()
+    body=text[start:hi]
+    contrast=re.search(r"(?i),\s*(?:but|while|whereas|however)\b",body)
+    if contrast: hi=start+contrast.start()
     s=start
     while s<hi and text[s] in " ,:-": s+=1
     while hi>s and text[hi-1] in " ,:-": hi-=1
@@ -219,17 +391,90 @@ def _bounded_address_after(text: str, start: int, max_len: int=150) -> tuple[int
 def _find_address_candidates(text: str) -> list[dict]:
     out=[]
     for m in _ADDRESS_LABEL.finditer(text):
+        # "postal code for my address is 110016" owns a PINCODE, not an ADDRESS.
+        if _ADDRESS_LABEL_NEGATIVE_PREFIX.search(_left_clause(text,m.start(),42)): continue
         span=_bounded_address_after(text,m.end())
         if not span: continue
         s,e=span; body=text[s:e]
-        if len(body)>=5 and ADDRESS_HINT.search(body):
-            out.append(_raw_item("ADDRESS",s,e,body,0.965,"clause_bounded_address_context",ner_review=True))
+        if len(body)>=5 and len(body.split())>=2 and _address_structure_score(body)>=3:
+            out.append(_raw_item("ADDRESS",s,e,body,0.975,"structured_clause_address",ner_review=True))
     for m in _RESIDENTIAL_PREFIX.finditer(text):
         span=_bounded_address_after(text,m.end(),130)
         if not span: continue
         s,e=span; body=text[s:e]
-        if len(body)>=5 and ADDRESS_HINT.search(body):
-            out.append(_raw_item("ADDRESS",s,e,body,0.76,"residential_phrase_address",ai_review=True,ner_review=True))
+        if len(body)>=5 and _address_structure_score(body)>=3:
+            out.append(_raw_item("ADDRESS",s,e,body,0.83,"residential_phrase_address",ai_review=True,ner_review=True))
+    for m in _DELIVERY_PREFIX.finditer(text):
+        span=_bounded_address_after(text,m.end(),150)
+        if not span: continue
+        s,e=span; body=text[s:e]
+        if len(body)>=8 and _address_structure_score(body)>=4:
+            out.append(_raw_item("ADDRESS",s,e,body,0.94,"delivery_destination_address",ner_review=True))
+    return out
+
+
+_SECRET_PLACEHOLDER = re.compile(r"(?i)^(?:your[_-]?(?:api[_-]?key|token|password)|api[_-]?key|token|password|changeme|replace[_-]?me|example[_-]?(?:key|token)|x{4,}|\*{4,}|<[^>]+>)$")
+_KNOWN_SECRET_PREFIX = re.compile(r"(?i)^(?:ghp_|github_pat_|sk-|xox[baprs]-|AIza|AKIA|ya29\.)")
+
+
+def _looks_real_secret(value: str) -> bool:
+    v=value.strip("\"'.,;:)")
+    if len(v)<12 or _SECRET_PLACEHOLDER.match(v): return False
+    if _KNOWN_SECRET_PREFIX.match(v): return True
+    classes=sum(bool(re.search(p,v)) for p in (r"[a-z]",r"[A-Z]",r"\d",r"[_~+\-/=.#@$%^&*!]"))
+    return len(v)>=18 and classes>=3
+
+
+def _find_credential_candidates(text: str) -> list[dict]:
+    out=[]
+    mapping={
+        "password":"PASSWORD","passcode":"PASSWORD","username":"USERNAME","user name":"USERNAME",
+        "api key":"API_KEY","access token":"AUTH_TOKEN","auth token":"AUTH_TOKEN",
+        "authentication token":"AUTH_TOKEN","github token":"AUTH_TOKEN",
+    }
+    for m in _CREDENTIAL_ASSIGN.finditer(text):
+        label=re.sub(r"[ _-]+"," ",m.group("label").casefold()).strip()
+        kind=mapping.get(label)
+        if not kind: continue
+        raw=m.group("value").rstrip(".,:;)")
+        if kind in {"API_KEY","AUTH_TOKEN"} and not _looks_real_secret(raw): continue
+        if kind=="USERNAME" and (len(raw)<3 or raw.casefold() in {"required","unknown","example","username","user"}): continue
+        if kind=="PASSWORD" and (len(raw)<6 or raw.casefold() in {"required","unknown","password","example","changeme"}): continue
+        s=m.start("value"); e=s+len(raw)
+        item=_raw_item(kind,s,e,text[s:e],0.99,"explicit_secret_assignment")
+        clause=_occurrence_context(text,s,e,160)
+        left=_role_left_context(text,s,100)
+        if _EXAMPLE_CONTEXT.search(clause) and not re.search(r"(?i)\b(?:my|mine|our|use|authenticate)\b",left):
+            item["confidence"]=0.25
+            item["decision_method"]="context_veto"
+            item["evidence"]+="+example_veto"
+        out.append(item)
+    for m in _AUTH_USE_TOKEN.finditer(text):
+        raw=m.group("value").rstrip(".,:;)")
+        if not _looks_real_secret(raw): continue
+        kind="API_KEY" if "api" in m.group("label").casefold() else "AUTH_TOKEN"
+        s=m.start("value"); e=s+len(raw)
+        out.append(_raw_item(kind,s,e,text[s:e],0.99,"explicit_secret_use_context"))
+    for m in _ENV_SECRET_ASSIGN.finditer(text):
+        label=m.group("label").upper()
+        raw=m.group("value").rstrip(".,:;)")
+        if label.endswith("PASSWORD"):
+            kind="PASSWORD"
+            if len(raw)<6 or _SECRET_PLACEHOLDER.match(raw): continue
+        elif label.endswith("TOKEN"):
+            kind="AUTH_TOKEN"
+            if not _looks_real_secret(raw): continue
+        else:
+            kind="API_KEY"
+            if not _looks_real_secret(raw): continue
+        s=m.start("value"); e=s+len(raw)
+        item=_raw_item(kind,s,e,text[s:e],0.99,"hardcoded_secret_assignment")
+        context=_occurrence_context(text,s,e,170)
+        if _EXAMPLE_CONTEXT.search(context):
+            item["confidence"]=0.25
+            item["decision_method"]="context_veto"
+            item["evidence"]+="+example_veto"
+        out.append(item)
     return out
 
 
@@ -237,13 +482,20 @@ def _find_address_candidates(text: str) -> list[dict]:
 
 def _spoken_candidates(text: str) -> list[dict]:
     out=[]
+    for c in find_spoken_alnum_runs(text):
+        ctx=_role_left_context(text,c["start"],100)
+        canonical=c["canonical"].upper()
+        if PAN_CONTEXT.search(ctx) and re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]",canonical):
+            out.append(_raw_item("PAN",c["start"],c["end"],c["value"],0.96,"spoken_pan_normalized",canonical=canonical))
+        elif IFSC_CONTEXT.search(ctx) and re.fullmatch(r"[A-Z]{4}0[A-Z0-9]{6}",canonical):
+            out.append(_raw_item("IFSC",c["start"],c["end"],c["value"],0.96,"spoken_ifsc_alphanumeric_normalized",canonical=canonical))
     for c in find_spoken_email_candidates(text):
-        ctx=_left_clause(text,c["start"],88)
+        ctx=_role_left_context(text,c["start"],88)
         domain=c["canonical"].rsplit("@",1)[-1]
         if EMAIL_CONTEXT.search(ctx) or domain.split(".",1)[0] in {"gmail","yahoo","outlook","hotmail","protonmail","icloud"}:
             out.append(_raw_item("EMAIL",c["start"],c["end"],c["value"],0.95,c["evidence"],canonical=c["canonical"]))
     for c in find_spoken_digit_runs(text):
-        digits=c["digits"]; ctx=_left_clause(text,c["start"],90)
+        digits=c["digits"]; ctx=_role_left_context(text,c["start"],90)
         kind=conf=evidence=None
         span_start=c["start"]
         # Spoken IFSC example: "IFSC is ABCD zero one two three four five six".
@@ -253,7 +505,10 @@ def _spoken_candidates(text: str) -> list[dict]:
         if IFSC_CONTEXT.search(ctx) and prefix and len(digits)==7 and digits.startswith("0"):
             kind,conf,evidence="IFSC",0.96,"spoken_ifsc_normalized"
             span_start=c["start"]-(len(ctx)-prefix.start(1))
-        elif PHONE_POSITIVE_CONTEXT.search(ctx) and len(digits)==10 and digits[:1] in "6789":
+        elif PHONE_POSITIVE_CONTEXT.search(ctx) and (
+            (len(digits)==10 and digits[:1] in "6789") or
+            (len(digits)==12 and digits.startswith("91") and digits[2:3] in "6789")
+        ):
             kind,conf,evidence="PHONE",0.95,"spoken_phone_context"
         elif AADHAAR_CONTEXT.search(ctx) and len(digits)==12 and digits[:1] not in "01":
             kind,conf,evidence="AADHAAR",0.94,"spoken_aadhaar_context"
@@ -268,6 +523,11 @@ def _spoken_candidates(text: str) -> list[dict]:
         elif PIN_CONTEXT.search(ctx) and len(digits)==6 and digits[:1] != "0":
             kind,conf,evidence="PINCODE",0.93,"spoken_postal_context"
         if kind:
+            if kind=="PHONE" and len(digits)==12 and digits.startswith("91"):
+                pre=text[max(0,c["start"]-8):c["start"]]
+                pm=re.search(r"(?i)\bplus\s+$",pre)
+                if pm:
+                    span_start=max(0,c["start"]-len(pre)+pm.start())
             value=text[span_start:c["end"]].strip() if span_start != c["start"] else c["value"].strip()
             canonical=(re.sub(r"\s+","",text[span_start:c["start"]]).upper()+digits) if kind=="IFSC" else digits
             out.append(_raw_item(kind,span_start,c["end"],value,conf,evidence,canonical=canonical))
@@ -333,18 +593,25 @@ def detect_pii(
 ) -> list[dict]:
     found: list[dict] = []
 
-    # Strong lexical structures.
-    for m in _EMAIL.finditer(text): found.append(_item("EMAIL",m,0.995,"email_structure"))
-    for m in _PAN.finditer(text): found.append(_item("PAN",m,0.995,"pan_structure"))
+    # Shape validation is separate from semantic ownership. Strong-looking values in
+    # documentation/reference roles are handled by the occurrence-context layer below.
+    for m in _EMAIL.finditer(text):
+        x=_item("EMAIL",m,0.995,"email_structure"); x["ai_review"]=True; found.append(x)
+    for m in _PAN.finditer(text):
+        left=_role_left_context(text,m.start(),88)
+        if PAN_CONTEXT.search(left):
+            found.append(_item("PAN",m,0.995,"pan_structure+pan_context"))
+        else:
+            x=_item("PAN",m,0.66,"pan_shape_without_ownership"); x["ai_review"]=True; found.append(x)
 
     # IFSC normalization: canonical is strong; separator/spoken forms need IFSC context.
     for c in find_ifsc_candidates(text):
-        ctx=_left_clause(text,c["start"],88)
+        ctx=_role_left_context(text,c["start"],88)
         canonical_shape=(c["evidence"]=="ifsc_canonical")
-        if canonical_shape:
+        if IFSC_CONTEXT.search(ctx):
             conf=0.995
-        elif IFSC_CONTEXT.search(ctx):
-            conf=0.995
+        elif canonical_shape:
+            conf=0.91
         else:
             # A separator-normalized identifier is still suggestive, but not enough to
             # hide arbitrary product/reference IDs in balanced mode.
@@ -356,18 +623,22 @@ def detect_pii(
 
     # UPI/VPA: do not mistake normal email domains for UPI handles.
     for m in _UPI.finditer(text):
-        provider=m.group(0).rsplit("@",1)[-1].lower(); ctx=_left_clause(text,m.start(),72)
-        if provider in UPI_HANDLES: found.append(_item("UPI",m,0.985,"known_upi_handle"))
+        provider=m.group(0).rsplit("@",1)[-1].lower(); ctx=_role_left_context(text,m.start(),72)
+        if provider in UPI_HANDLES:
+            x=_item("UPI",m,0.985,"known_upi_handle"); x["ai_review"]=True; found.append(x)
         elif UPI_CONTEXT.search(ctx): found.append(_item("UPI",m,0.93,"upi_context"))
 
     for m in _CARD.finditer(text):
         if luhn_valid(m.group(0)):
-            ctx=_left_clause(text,m.start(),72)
-            found.append(_item("CARD",m,0.995 if CARD_CONTEXT.search(ctx) else 0.965,"luhn_valid"))
+            ctx=_role_left_context(text,m.start(),72)
+            if CARD_CONTEXT.search(ctx):
+                found.append(_item("CARD",m,0.995,"luhn_valid+card_context"))
+            else:
+                x=_item("CARD",m,0.88,"luhn_valid_without_ownership"); x["ai_review"]=True; found.append(x)
 
     for m in _AADHAAR.finditer(text):
         if len(_digits(m.group(0)))!=12: continue
-        ctx=_left_clause(text,m.start(),72)
+        ctx=_role_left_context(text,m.start(),72)
         if verhoeff_valid(m.group(0)): found.append(_item("AADHAAR",m,0.995,"verhoeff_valid"))
         elif AADHAAR_CONTEXT.search(ctx):
             x=_item("AADHAAR",m,0.91,"aadhaar_context_checksum_unverified"); x["ai_review"]=True; found.append(x)
@@ -375,8 +646,8 @@ def detect_pii(
     for m in _PHONE.finditer(text):
         digits=_digits(m.group(0)); local=digits[-10:]
         if len(local)!=10 or local[0] not in "6789": continue
-        left=_left_clause(text,m.start(),72)
-        positive=bool(PHONE_POSITIVE_CONTEXT.search(left))
+        left=_role_left_context(text,m.start(),84)
+        positive=bool(PHONE_POSITIVE_CONTEXT.search(left) or PHONE_FOLLOWING_CONTEXT.search(_right_clause(text,m.end(),72)))
         negative=bool(PHONE_NEGATIVE_CONTEXT.search(left))
         if positive:
             found.append(_item("PHONE",m,0.985,"phone_context"))
@@ -390,43 +661,47 @@ def detect_pii(
     for m in _LONG_NUMBER.finditer(text):
         digits=_digits(m.group(0))
         if not 9<=len(digits)<=18: continue
-        ctx=_left_clause(text,m.start(),88)
+        ctx=_role_left_context(text,m.start(),96)
         if ACCOUNT_CONTEXT.search(ctx):
             found.append(_item("ACCOUNT_NUMBER",m,0.95,"account_context"))
         elif re.search(r"(?i)\b(?:banking\s+details|bank\s+details|debit\s+from|credit\s+to|beneficiary\s+details)\b",ctx):
             x=_item("ACCOUNT_NUMBER",m,0.73,"weak_banking_context"); x.update(ai_review=True,ner_review=True); found.append(x)
 
     for m in _OTP.finditer(text):
-        ctx=_left_clause(text,m.start(),64)
+        ctx=_role_left_context(text,m.start(),72)
         if OTP_CONTEXT.search(ctx) and not CVV_CONTEXT.search(ctx): found.append(_item("OTP",m,0.97,"otp_context"))
         elif re.search(r"(?i)\b(?:verify|authenticate|login|sign\s*in)\b",ctx):
             x=_item("OTP",m,0.74,"weak_auth_context"); x.update(ai_review=True,ner_review=True); found.append(x)
     for m in _CVV.finditer(text):
-        if CVV_CONTEXT.search(_left_clause(text,m.start(),56)): found.append(_item("CVV",m,0.97,"cvv_context"))
+        if CVV_CONTEXT.search(_role_left_context(text,m.start(),64)): found.append(_item("CVV",m,0.97,"cvv_context"))
 
     for m in _PINCODE.finditer(text):
-        ctx=_left_clause(text,m.start(),82)
+        ctx=_role_left_context(text,m.start(),90)
         if PIN_CONTEXT.search(ctx) or re.search(r"(?i)\baddress\b",ctx): found.append(_item("PINCODE",m,0.94,"postal_context"))
         elif re.search(r"(?i)\b(?:live|reside|home|residence|staying|located)\b",ctx):
             x=_item("PINCODE",m,0.72,"weak_residential_context"); x.update(ai_review=True,ner_review=True); found.append(x)
 
     for m in _DOB.finditer(text):
-        if DOB_CONTEXT.search(_left_clause(text,m.start(),72)): found.append(_item("DOB",m,0.96,"dob_context"))
+        if DOB_CONTEXT.search(_role_left_context(text,m.start(),82)): found.append(_item("DOB",m,0.96,"dob_context"))
     for c in find_natural_date_candidates(text):
-        if DOB_CONTEXT.search(_left_clause(text,c["start"],80)):
+        if DOB_CONTEXT.search(_role_left_context(text,c["start"],90)):
             found.append(_raw_item("DOB",c["start"],c["end"],c["value"],0.96,"natural_language_dob",canonical=c["canonical"],ner_review=True))
 
     for m in _PASSPORT.finditer(text):
-        if PASSPORT_CONTEXT.search(_left_clause(text,m.start(),72)): found.append(_item("PASSPORT",m,0.97,"passport_context_structure"))
+        if PASSPORT_CONTEXT.search(_role_left_context(text,m.start(),80)): found.append(_item("PASSPORT",m,0.97,"passport_context_structure"))
     for m in _VOTER_ID.finditer(text):
-        if VOTER_CONTEXT.search(_left_clause(text,m.start(),72)): found.append(_item("VOTER_ID",m,0.96,"voter_id_context_structure"))
+        if VOTER_CONTEXT.search(_role_left_context(text,m.start(),80)): found.append(_item("VOTER_ID",m,0.96,"voter_id_context_structure"))
     for m in _DRIVING_LICENSE.finditer(text):
-        if DL_CONTEXT.search(_left_clause(text,m.start(),80)): found.append(_item("DRIVING_LICENSE",m,0.96,"driving_license_context_structure"))
+        if DL_CONTEXT.search(_role_left_context(text,m.start(),88)): found.append(_item("DRIVING_LICENSE",m,0.96,"driving_license_context_structure"))
 
     found.extend(_find_name_candidates(text))
     found.extend(_find_address_candidates(text))
+    found.extend(_find_credential_candidates(text))
     found.extend(_spoken_candidates(text))
 
+    # v4.6 architecture: candidate -> validator -> occurrence context/veto -> optional AI
+    # -> conflict resolver. Hard negative context runs before AI for speed and precision.
+    found=_apply_occurrence_context_policy(text,found)
     reviewed=_fuse_ner_many(text,found,use_ner)
     reviewed=_fuse_semantic_many(text,reviewed,use_semantic)
     return _resolve_conflicts(x for x in reviewed if x["confidence"]>=min_confidence)

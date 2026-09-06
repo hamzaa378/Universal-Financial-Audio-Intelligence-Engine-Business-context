@@ -69,7 +69,10 @@ _DIGIT_WORDS = {
     "zero": "0", "oh": "0", "o": "0", "one": "1", "two": "2", "three": "3",
     "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
 }
-_DIGIT_TOKEN = r"(?:zero|oh|o|one|two|three|four|five|six|seven|eight|nine|double|triple)"
+# Long/complete words must appear before the single-letter ASR variant `o`.
+# Otherwise regex alternation can consume the `o` at the start of `one` and silently
+# normalize spoken 1 as 0.
+_DIGIT_TOKEN = r"(?:double|triple|zero|oh|one|two|three|four|five|six|seven|eight|nine|o)"
 _SPOKEN_DIGIT_RUN = re.compile(rf"(?i)(?<!\w){_DIGIT_TOKEN}(?:[\s,.;:\-]+{_DIGIT_TOKEN}){{2,}}(?!\w)")
 
 
@@ -98,6 +101,61 @@ def find_spoken_digit_runs(text: str) -> list[dict]:
         }
         for m in _SPOKEN_DIGIT_RUN.finditer(text)
     ]
+
+
+# Spoken alphanumeric identifiers (NATO/phonetic alphabet + digit words). These are
+# emitted as candidates only; the PII layer still requires a type-specific context and
+# validates the canonical PAN/IFSC shape before masking.
+_NATO_WORDS = {
+    "alpha":"A", "bravo":"B", "charlie":"C", "delta":"D", "echo":"E",
+    "foxtrot":"F", "golf":"G", "hotel":"H", "india":"I", "juliett":"J", "juliet":"J",
+    "kilo":"K", "lima":"L", "mike":"M", "november":"N", "oscar":"O", "papa":"P",
+    "quebec":"Q", "romeo":"R", "sierra":"S", "tango":"T", "uniform":"U",
+    "victor":"V", "whiskey":"W", "xray":"X", "x-ray":"X", "yankee":"Y", "zulu":"Z",
+}
+_NATO_TOKEN = "(?:" + "|".join(sorted((re.escape(x) for x in _NATO_WORDS), key=len, reverse=True)) + ")"
+_SPOKEN_ALNUM_TOKEN = rf"(?:{_NATO_TOKEN}|[A-Z]|{_DIGIT_TOKEN})"
+_SPOKEN_ALNUM_RUN = re.compile(
+    rf"(?i)(?<!\w){_SPOKEN_ALNUM_TOKEN}(?:[\s,.;:\-]+{_SPOKEN_ALNUM_TOKEN}){{5,}}(?!\w)"
+)
+_SPOKEN_ALNUM_TOKEN_RE = re.compile(rf"(?i)(?<!\w)({_SPOKEN_ALNUM_TOKEN})(?!\w)")
+
+
+def parse_spoken_alnum(raw: str) -> str:
+    out=[]
+    repeat=1
+    for m in _SPOKEN_ALNUM_TOKEN_RE.finditer(raw):
+        token=m.group(1)
+        t=token.casefold()
+        if t=="double":
+            repeat=2; continue
+        if t=="triple":
+            repeat=3; continue
+        if t in _DIGIT_WORDS:
+            value=_DIGIT_WORDS[t]
+        elif t in _NATO_WORDS:
+            value=_NATO_WORDS[t]
+        elif len(token)==1 and token.isalpha():
+            value=token.upper()
+        else:
+            repeat=1; continue
+        out.extend([value]*repeat)
+        repeat=1
+    return "".join(out)
+
+
+def find_spoken_alnum_runs(text: str) -> list[dict]:
+    out=[]
+    for m in _SPOKEN_ALNUM_RUN.finditer(text):
+        raw=m.group(0)
+        tokens=[x.group(1) for x in _SPOKEN_ALNUM_TOKEN_RE.finditer(raw)]
+        has_alpha=any(t.casefold() in _NATO_WORDS or (len(t)==1 and t.isalpha() and t.casefold() not in _DIGIT_WORDS) for t in tokens)
+        if not has_alpha:
+            continue
+        canonical=parse_spoken_alnum(raw)
+        if canonical:
+            out.append({"start":m.start(),"end":m.end(),"value":raw,"canonical":canonical,"evidence":"spoken_alphanumeric_normalized"})
+    return out
 
 
 # Multi-level email recognizer. Examples:

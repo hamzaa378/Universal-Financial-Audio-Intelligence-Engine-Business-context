@@ -1,0 +1,30 @@
+{"id":"email_personal","text":"My registered email is arjun.mehta94@gmail.com.","expected":[{"type":"EMAIL","value":"arjun.mehta94@gmail.com"}]}
+{"id":"email_doc_negative","text":"The documentation example uses arjun.mehta94@gmail.com as a sample email address.","expected":[]}
+{"id":"pan_personal","text":"My PAN is BCDPM4321K.","expected":[{"type":"PAN","value":"BCDPM4321K"}]}
+{"id":"pan_serial_negative","text":"The product serial number is BCDPM4321K.","expected":[]}
+{"id":"ifsc_personal","text":"My IFSC code is ICIC0001234.","expected":[{"type":"IFSC","value":"ICIC0001234"}]}
+{"id":"ifsc_config_negative","text":"The configuration file contains the literal text ICIC0001234 as a test value.","expected":[]}
+{"id":"card_personal","text":"My credit card number is 4111 1111 1111 1111.","expected":[{"type":"CARD","value":"4111 1111 1111 1111"}]}
+{"id":"card_test_negative","text":"The software test documentation uses 4111 1111 1111 1111 as a standard test card number.","expected":[]}
+{"id":"upi_personal","text":"Transfer the amount to rohit@oksbi.","expected":[{"type":"UPI","value":"rohit@oksbi"}]}
+{"id":"upi_doc_negative","text":"The documentation states that rohit@oksbi is the example VPA used throughout this manual.","expected":[]}
+{"id":"phone_his_number","text":"The customer told me his number is 9988776655.","expected":[{"type":"PHONE","value":"9988776655"}]}
+{"id":"phone_her_number","text":"Her number is 8877665544.","expected":[{"type":"PHONE","value":"8877665544"}]}
+{"id":"phone_future_contact","text":"Please save 7766554433 for future contact.","expected":[{"type":"PHONE","value":"7766554433"}]}
+{"id":"phone_report_negative","text":"The number 6655443322 appears in the report.","expected":[]}
+{"id":"phone_score_negative","text":"Rahul scored 9988776655 points in the synthetic benchmark.","expected":[]}
+{"id":"address_delivery","text":"Send the package to Flat 9B, Sunrise Apartments, Baner Road, Pune 411045.","expected":[{"type":"ADDRESS","value":"Flat 9B, Sunrise Apartments, Baner Road, Pune 411045"}]}
+{"id":"pincode_only","text":"The postal code for my address is 110016.","expected":[{"type":"PINCODE","value":"110016"}]}
+{"id":"self_name","text":"For final verification, I am Neha Kapoor.","expected":[{"type":"NAME","value":"Neha Kapoor"}]}
+{"id":"self_name_negative","text":"I am calling regarding a payment issue.","expected":[]}
+{"id":"password_personal","text":"My password is winterMoon#83.","expected":[{"type":"PASSWORD","value":"winterMoon#83"}]}
+{"id":"password_explanation_negative","text":"The article recommends that a password should contain letters, numbers and symbols.","expected":[]}
+{"id":"username_personal","text":"My username is arjun_m94.","expected":[{"type":"USERNAME","value":"arjun_m94"}]}
+{"id":"username_label_negative","text":"The UI field is labelled username.","expected":[]}
+{"id":"api_key_personal","text":"My API key is sk-test-51KLMN7832xyzPQ098765.","expected":[{"type":"API_KEY","value":"sk-test-51KLMN7832xyzPQ098765"}]}
+{"id":"api_placeholder_negative","text":"The source code tutorial contains API_KEY=\"YOUR_API_KEY_HERE\".","expected":[]}
+{"id":"auth_token_personal","text":"Please use token ghp_3XyExampleToken1234567890abcDEF for authentication.","expected":[{"type":"AUTH_TOKEN","value":"ghp_3XyExampleToken1234567890abcDEF"}]}
+{"id":"auth_prefix_doc_negative","text":"The documentation says GitHub tokens often start with ghp_.","expected":[]}
+{"id":"dob_occurrence_1","text":"My DOB is 21 January 2002.","expected":[{"type":"DOB","value":"21 January 2002"}]}
+{"id":"dob_deadline_negative","text":"The application deadline was 21 January 2002.","expected":[]}
+{"id":"reference_pan_negative","text":"Asset code QWE1234567 belongs to the warehouse.","expected":[]}
