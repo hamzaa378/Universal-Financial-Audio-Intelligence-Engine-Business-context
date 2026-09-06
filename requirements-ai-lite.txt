@@ -1,0 +1,3 @@
+# Lightweight neural semantic decision layer. Uses ONNX Runtime through FastEmbed;
+# does not require torch/torchvision for this feature.
+fastembed>=0.7

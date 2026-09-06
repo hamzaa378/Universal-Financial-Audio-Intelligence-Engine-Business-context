@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
+from decision_ai.privacy_judge import judge_many as semantic_judge_many, engine_status as semantic_engine_status
+
 # ---------- deterministic validators ----------
 
 def _digits(value: str) -> str:
@@ -72,9 +74,15 @@ _OTP = re.compile(r"(?<!\d)\d{4,8}(?!\d)")
 _CVV = re.compile(r"(?<!\d)\d{3,4}(?!\d)")
 _PINCODE = re.compile(r"(?<!\d)[1-9]\d{5}(?!\d)")
 _DOB = re.compile(r"(?<!\d)(?:0?[1-9]|[12]\d|3[01])[-/.](?:0?[1-9]|1[0-2])[-/.](?:19|20)\d{2}(?!\d)")
+_PASSPORT = re.compile(r"(?i)\b[A-Z][1-9][0-9]{6}\b")
+_VOTER_ID = re.compile(r"(?i)\b[A-Z]{3}[0-9]{7}\b")
+_DRIVING_LICENSE = re.compile(r"(?i)\b[A-Z]{2}[ -]?[0-9]{2}[ -]?(?:(?:19|20)[0-9]{2}[ -]?)?[0-9]{7}\b")
 _NAME = re.compile(r"(?i)\b(?:my\s+name\s+is|name\s*[:=])\s+([A-Z][A-Za-z.'-]{1,30}(?:\s+[A-Z][A-Za-z.'-]{1,30}){0,3})")
 _ADDRESS = re.compile(
     r"(?i)\b(?:(?:my|your)\s+)?(?:(?:current|residential|registered|communication|permanent)\s+)?address\s*(?:is|:|=)\s*([^.!?\n]{5,140})"
+)
+_FREEFORM_ADDRESS = re.compile(
+    r"(?i)\b((?:(?:flat|house|plot|door|apartment|apt|h\.?\s*no\.?)\s*[A-Z0-9/-]+)[^.!?\n]{2,110}?(?:road|rd|street|st|lane|sector|nagar|colony|phase|block|village|district)\b[^.!?\n]{0,60})"
 )
 
 UPI_HANDLES = {
@@ -85,12 +93,15 @@ UPI_HANDLES = {
 PHONE_NEGATIVE_CONTEXT = re.compile(
     r"(?i)\b(?:order|transaction|txn|reference|ref|loan|customer|application|invoice|ticket)\s*(?:id|number|no\.?|#)?(?:\s+is)?\s*[:=-]?\s*$"
 )
-PHONE_POSITIVE_CONTEXT = re.compile(r"(?i)\b(?:phone|mobile|contact|call(?:\s+me)?|whatsapp|telephone)\b")
+PHONE_POSITIVE_CONTEXT = re.compile(r"(?i)\b(?:phone|mobile|contact|call(?:\s+me)?|whatsapp|telephone|reach\s+me|ring\s+me|number\s+to\s+reach)\b")
 ACCOUNT_CONTEXT = re.compile(r"(?i)\b(?:account|a/c|acct|loan\s+account|bank\s+account)\s*(?:number|no\.?|#)?\b")
 OTP_CONTEXT = re.compile(r"(?i)\b(?:otp|one[- ]time\s+(?:password|passcode)|verification\s+code|security\s+code|auth(?:entication)?\s+code)\b")
 CVV_CONTEXT = re.compile(r"(?i)\b(?:cvv|cvc|card\s+security\s+code|card\s+verification\s+value)\b")
 PIN_CONTEXT = re.compile(r"(?i)\b(?:pin\s*code|pincode|postal\s+code|zip\s+code)\b")
 DOB_CONTEXT = re.compile(r"(?i)\b(?:dob|date\s+of\s+birth|born\s+on|birth\s+date)\b")
+PASSPORT_CONTEXT = re.compile(r"(?i)\b(?:passport|passport\s+(?:number|no\.?))\b")
+VOTER_CONTEXT = re.compile(r"(?i)\b(?:voter\s*(?:id|card)|epic\s*(?:id|number|no\.?))\b")
+DL_CONTEXT = re.compile(r"(?i)\b(?:driving\s+licen[cs]e|driver'?s\s+licen[cs]e|dl\s*(?:number|no\.?))\b")
 AADHAAR_CONTEXT = re.compile(r"(?i)\b(?:aadhaar|aadhar|uidai|uid\s+number)\b")
 CARD_CONTEXT = re.compile(r"(?i)\b(?:card|credit\s+card|debit\s+card|visa|mastercard|rupay)\b")
 UPI_CONTEXT = re.compile(r"(?i)\b(?:upi|vpa|virtual\s+payment\s+address|pay\s+id)\b")
@@ -105,6 +116,16 @@ def _window(text: str, start: int, end: int, radius: int = 44) -> str:
 
 def _left_window(text: str, start: int, radius: int = 48) -> str:
     return text[max(0, start-radius):start]
+
+
+def _left_clause(text: str, start: int, radius: int = 72) -> str:
+    """Context owned by the candidate: do not borrow labels from a later sentence."""
+    lo=max(0,start-radius)
+    for sep in (".", "!", "?", "\n", ";"):
+        pos=text.rfind(sep, lo, start)
+        if pos >= lo:
+            lo=max(lo,pos+1)
+    return text[lo:start]
 
 
 def _item(kind: str, m: re.Match, confidence: float, evidence: str) -> dict:
@@ -127,7 +148,7 @@ def _resolve_conflicts(items: Iterable[dict]) -> list[dict]:
     priority = {
         "EMAIL": 100, "PAN": 99, "IFSC": 98, "UPI": 97, "AADHAAR": 96,
         "CARD": 95, "PHONE": 90, "ACCOUNT_NUMBER": 85, "DOB": 80,
-        "OTP": 78, "CVV": 77, "PINCODE": 75, "ADDRESS": 93, "NAME": 70,
+        "OTP": 78, "CVV": 77, "PINCODE": 75, "ADDRESS": 93, "NAME": 70, "PASSPORT": 94, "VOTER_ID": 92, "DRIVING_LICENSE": 92,
     }
     ranked = sorted(
         items,
@@ -168,14 +189,14 @@ def _spoken_candidates(text: str) -> list[dict]:
     out=[]
     # Spoken emails are common ASR output: "name at gmail dot com".
     for m in _SPOKEN_EMAIL.finditer(text):
-        ctx=_window(text,m.start(),m.end(),42)
+        ctx=_left_clause(text,m.start(),72)
         domain=m.group(2).lower()
         if EMAIL_CONTEXT.search(ctx) or domain in {"gmail","yahoo","outlook","hotmail","protonmail","icloud"}:
             out.append({"type":"EMAIL","start":m.start(),"end":m.end(),"value":m.group(0),"confidence":0.93,"evidence":"spoken_email_asr"})
     # Spoken digit runs are only classified when a nearby label makes the type clear.
     for m in _SPOKEN_DIGIT_RUN.finditer(text):
         digits=_parse_spoken_digits(m.group(0))
-        ctx=_window(text,m.start(),m.end(),48)
+        ctx=_left_clause(text,m.start(),72)
         kind=conf=evidence=None
         if PHONE_POSITIVE_CONTEXT.search(ctx) and len(digits)==10 and digits[:1] in "6789":
             kind,conf,evidence="PHONE",0.94,"spoken_phone_context"
@@ -196,11 +217,40 @@ def _spoken_candidates(text: str) -> list[dict]:
     return out
 
 
-def detect_pii(text: str, min_confidence: float = 0.80) -> list[dict]:
-    """Return high-confidence PII spans.
+def _fuse_semantic_many(text: str, items: list[dict], use_semantic: bool) -> list[dict]:
+    """Fuse rule evidence with neural context in one batched semantic pass."""
+    out=[dict(x) for x in items]
+    review_idx=[i for i,x in enumerate(out) if use_semantic and x.get("ai_review")]
+    if not review_idx:
+        for x in out:
+            x["decision_method"]="deterministic"
+        return out
+    review_items=[out[i] for i in review_idx]
+    scores=semantic_judge_many(text, review_items)
+    for i,x in enumerate(out):
+        if i not in review_idx:
+            x["decision_method"]="deterministic"
+    for idx,ai in zip(review_idx,scores):
+        item=out[idx]
+        if not ai.get("available"):
+            item["decision_method"]="rules_fallback"
+            continue
+        base=float(item["confidence"]); ai_score=float(ai["score"])
+        fused=min(0.995,max(0.0,0.50*base+0.50*ai_score+0.08))
+        item["rule_confidence"]=round(base,3)
+        item["semantic_score"]=round(ai_score,4)
+        item["semantic_margin"]=ai.get("margin")
+        item["confidence"]=round(fused,3)
+        item["decision_method"]="hybrid_semantic_batched"
+        item["evidence"]=item.get("evidence","")+"+semantic"
+    return out
 
-    Ambiguous numeric types require local financial/UI context. Structured identifiers
-    use validators where available. `min_confidence` can be raised in high-precision mode.
+def detect_pii(text: str, min_confidence: float = 0.80, use_semantic: bool = False) -> list[dict]:
+    """Return privacy candidates after deterministic validation + optional semantic AI.
+
+    The neural layer is deliberately selective: strong structures (email/PAN/IFSC/Luhn
+    card/checksum Aadhaar) bypass it.  Only ambiguous values are sent to the semantic
+    judge, and the raw value is replaced with <VALUE> before embedding.
     """
     found: list[dict] = []
 
@@ -215,7 +265,7 @@ def detect_pii(text: str, min_confidence: float = 0.80) -> list[dict]:
     # UPI/VPA: do not mistake normal email domains for UPI handles.
     for m in _UPI.finditer(text):
         provider = m.group(0).rsplit("@", 1)[-1].lower()
-        ctx = _window(text, m.start(), m.end())
+        ctx = _left_clause(text, m.start(), 72)
         if provider in UPI_HANDLES:
             found.append(_item("UPI", m, 0.985, "known_upi_handle"))
         elif UPI_CONTEXT.search(ctx):
@@ -226,66 +276,109 @@ def detect_pii(text: str, min_confidence: float = 0.80) -> list[dict]:
         value = m.group(0)
         digits = _digits(value)
         if 13 <= len(digits) <= 19 and luhn_valid(value):
-            ctx = _window(text, m.start(), m.end())
+            ctx = _left_clause(text, m.start(), 72)
             conf = 0.995 if CARD_CONTEXT.search(ctx) else 0.965
             found.append(_item("CARD", m, conf, "luhn_valid"))
 
-    # Aadhaar: checksum gives strongest evidence. A checksum-invalid candidate is
-    # accepted only when Aadhaar is explicitly mentioned, useful for synthetic demos.
+    # Aadhaar: checksum is strong. Context-only synthetic/unverified values get AI review.
     for m in _AADHAAR.finditer(text):
         value = m.group(0)
         if len(_digits(value)) != 12:
             continue
-        ctx = _window(text, m.start(), m.end())
+        ctx = _left_clause(text, m.start(), 72)
         if verhoeff_valid(value):
             found.append(_item("AADHAAR", m, 0.995, "verhoeff_valid"))
         elif AADHAAR_CONTEXT.search(ctx):
-            found.append(_item("AADHAAR", m, 0.91, "aadhaar_context_checksum_unverified"))
+            x=_item("AADHAAR", m, 0.91, "aadhaar_context_checksum_unverified")
+            x["ai_review"]=True
+            found.append(x)
 
-    # Indian phone. Suppress identifier-like contexts unless a phone cue is nearby.
+    # Indian phone: explicit context is strong; a bare 10-digit shape is ambiguous and
+    # must either receive semantic support or remain below the balanced threshold.
     for m in _PHONE.finditer(text):
         digits = _digits(m.group(0))
         local = digits[-10:]
         if len(local) != 10 or local[0] not in "6789":
             continue
-        left = _left_window(text, m.start())
-        ctx = _window(text, m.start(), m.end())
-        positive = bool(PHONE_POSITIVE_CONTEXT.search(ctx))
-        negative = bool(PHONE_NEGATIVE_CONTEXT.search(left))
-        if negative and not positive:
-            continue
-        separated = bool(re.search(r"[ +.\-]", m.group(0)))
-        conf = 0.985 if positive else (0.94 if separated or digits.startswith("91") else 0.90)
-        found.append(_item("PHONE", m, conf, "phone_context" if positive else "phone_structure"))
+        left = _left_clause(text, m.start(), 72)
+        ctx = left
+        positive = bool(PHONE_POSITIVE_CONTEXT.search(left))
+        negative = bool(PHONE_NEGATIVE_CONTEXT.search(left) or re.search(
+            r"(?i)\b(?:order|transaction|txn|reference|ref|loan|customer|application|invoice|ticket|case|employee|tracking|token|request)\s*(?:id|number|no\.?|#)?\b", ctx
+        ))
+        if positive:
+            found.append(_item("PHONE", m, 0.985, "phone_context"))
+        elif negative:
+            # Keep a weak candidate only for semantic diagnostics; it should not pass
+            # unless the surrounding sentence clearly contradicts the identifier cue.
+            x=_item("PHONE", m, 0.58, "identifier_like_context")
+            x["ai_review"]=True
+            found.append(x)
+        else:
+            separated = bool(re.search(r"[ +.\-]", m.group(0)))
+            base = 0.79 if not separated and not digits.startswith("91") else 0.83
+            x=_item("PHONE", m, base, "ambiguous_phone_shape")
+            x["ai_review"]=True
+            found.append(x)
 
-    # Account numbers must have account context; otherwise long numbers are too ambiguous.
+    # Long numeric values: explicit account context is strong.  Natural banking language
+    # gets a weak semantic-review candidate instead of being automatically masked.
     for m in _LONG_NUMBER.finditer(text):
         digits = _digits(m.group(0))
         if not 9 <= len(digits) <= 18:
             continue
-        ctx = _window(text, m.start(), m.end())
+        ctx = _left_clause(text, m.start(), 88)
         if ACCOUNT_CONTEXT.search(ctx):
             found.append(_item("ACCOUNT_NUMBER", m, 0.95, "account_context"))
+        elif re.search(r"(?i)\b(?:banking\s+details|bank\s+details|debit\s+from|credit\s+to|beneficiary\s+details)\b", ctx):
+            x=_item("ACCOUNT_NUMBER", m, 0.73, "weak_banking_context")
+            x["ai_review"]=True
+            found.append(x)
 
-    # OTP and CVV are intentionally context-only to reduce false positives.
+    # OTP/CVV remain context-first because short numbers are extremely ambiguous.
     for m in _OTP.finditer(text):
-        ctx = _window(text, m.start(), m.end(), 34)
+        ctx = _left_clause(text, m.start(), 64)
         if OTP_CONTEXT.search(ctx) and not CVV_CONTEXT.search(ctx):
             found.append(_item("OTP", m, 0.97, "otp_context"))
+        elif re.search(r"(?i)\b(?:verify|authenticate|login|sign\s*in)\b", ctx):
+            x=_item("OTP", m, 0.74, "weak_auth_context")
+            x["ai_review"]=True
+            found.append(x)
     for m in _CVV.finditer(text):
-        ctx = _window(text, m.start(), m.end(), 30)
+        ctx = _left_clause(text, m.start(), 56)
         if CVV_CONTEXT.search(ctx):
             found.append(_item("CVV", m, 0.97, "cvv_context"))
 
+    # Postal code with explicit labels/address is strong; residential phrasing can be
+    # rescued by semantic AI while amount/reference contexts stay unmasked.
     for m in _PINCODE.finditer(text):
-        ctx = _window(text, m.start(), m.end(), 40)
+        ctx = _left_clause(text, m.start(), 82)
         if PIN_CONTEXT.search(ctx) or re.search(r"(?i)\baddress\b", ctx):
             found.append(_item("PINCODE", m, 0.94, "postal_context"))
+        elif re.search(r"(?i)\b(?:live|reside|home|residence|staying|located)\b", ctx):
+            x=_item("PINCODE", m, 0.72, "weak_residential_context")
+            x["ai_review"]=True
+            found.append(x)
 
     for m in _DOB.finditer(text):
-        ctx = _window(text, m.start(), m.end(), 36)
+        ctx = _left_clause(text, m.start(), 64)
         if DOB_CONTEXT.search(ctx):
             found.append(_item("DOB", m, 0.96, "dob_context"))
+
+    # Additional Indian identity documents are context-gated to avoid collisions with
+    # ordinary alphanumeric reference numbers.
+    for m in _PASSPORT.finditer(text):
+        ctx=_left_clause(text,m.start(),72)
+        if PASSPORT_CONTEXT.search(ctx):
+            found.append(_item("PASSPORT",m,0.97,"passport_context_structure"))
+    for m in _VOTER_ID.finditer(text):
+        ctx=_left_clause(text,m.start(),72)
+        if VOTER_CONTEXT.search(ctx):
+            found.append(_item("VOTER_ID",m,0.96,"voter_id_context_structure"))
+    for m in _DRIVING_LICENSE.finditer(text):
+        ctx=_left_clause(text,m.start(),80)
+        if DL_CONTEXT.search(ctx):
+            found.append(_item("DRIVING_LICENSE",m,0.96,"driving_license_context_structure"))
 
     # Context-only name; capture only the actual name group, not the label words.
     for m in _NAME.finditer(text):
@@ -294,23 +387,30 @@ def detect_pii(text: str, min_confidence: float = 0.80) -> list[dict]:
         if value.lower() not in {"not available", "not disclosed", "unknown"}:
             found.append({"type":"NAME","start":s,"end":e,"value":value,"confidence":0.92,"evidence":"explicit_name_context"})
 
-    # Address requires an explicit address label + address-like content to avoid
-    # masking explanatory sentences such as "address is required for KYC".
+    # Explicitly labelled addresses remain deterministic.
     for m in _ADDRESS.finditer(text):
         body = m.group(1).strip(" ,")
         if ADDRESS_HINT.search(body):
-            s = m.start(1)
-            e = s + len(m.group(1))
-            # Trim trailing whitespace/punctuation while preserving source offsets.
-            while e > s and text[e-1] in " ,;":
-                e -= 1
+            s = m.start(1); e = s + len(m.group(1))
+            while e > s and text[e-1] in " ,;": e -= 1
             found.append({"type":"ADDRESS","start":s,"end":e,"value":text[s:e],"confidence":0.96,"evidence":"explicit_address_context"})
+
+    # Free-form address patterns are never auto-masked by shape alone; semantic review
+    # decides whether the phrase is a person's residence versus explanatory/location text.
+    for m in _FREEFORM_ADDRESS.finditer(text):
+        s,e=m.span(1)
+        x={"type":"ADDRESS","start":s,"end":e,"value":text[s:e],"confidence":0.71,"evidence":"freeform_address_shape","ai_review":True}
+        found.append(x)
 
     found.extend(_spoken_candidates(text))
 
-    resolved = _resolve_conflicts(x for x in found if x["confidence"] >= min_confidence)
+    reviewed=_fuse_semantic_many(text, found, use_semantic)
+    resolved = _resolve_conflicts(x for x in reviewed if x["confidence"] >= min_confidence)
     return resolved
 
+
+def semantic_status() -> dict:
+    return semantic_engine_status()
 
 def _partial_mask(kind: str, value: str) -> str:
     digits = _digits(value)
@@ -335,13 +435,16 @@ def mask_pii(text: str, entities: Iterable[dict], mode: str = "full") -> str:
     return masked
 
 
-def public_pii_metadata(entities: Iterable[dict]) -> list[dict]:
-    """Return metadata safe for normal logs/UI; never include the raw PII value."""
+def public_pii_metadata(entities: Iterable[dict], reveal_suffix: bool = False) -> list[dict]:
+    """Return UI/log metadata without raw PII. Suffix reveal is explicit opt-in."""
     out = []
     for e in entities:
         out.append({
             "type": e["type"], "start": e["start"], "end": e["end"],
             "confidence": e["confidence"], "evidence": e.get("evidence", ""),
-            "masked_value": _partial_mask(e["type"], e.get("value", "")),
+            "decision_method": e.get("decision_method", "deterministic"),
+            "rule_confidence": e.get("rule_confidence"),
+            "semantic_score": e.get("semantic_score"),
+            "masked_value": _partial_mask(e["type"], e.get("value", "")) if reveal_suffix else f"[{e['type']} REDACTED]",
         })
     return out

@@ -58,3 +58,23 @@
 {"id": "spoken_otp", "text": "Your OTP is four eight three nine two one.", "expected": [{"type": "OTP", "value": "four eight three nine two one"}]}
 {"id": "spoken_cvv", "text": "Card security code is four eight two one.", "expected": [{"type": "CVV", "value": "four eight two one"}]}
 {"id": "spoken_neg_amount", "text": "The amount is four eight three nine two one rupees.", "expected": []}
+{"id":"hard_neg_case","text":"Case number 9876543210 was escalated to the grievance desk.","expected":[]}
+{"id":"hard_neg_employee","text":"Employee ID 9123456789 belongs to the collections agent.","expected":[]}
+{"id":"hard_neg_tracking","text":"Tracking number 87654 32109 shows the courier status.","expected":[]}
+{"id":"hard_neg_token","text":"The token 9876543210 expires after processing.","expected":[]}
+{"id":"hard_neg_request","text":"Request number 91234-56789 was closed today.","expected":[]}
+{"id":"hard_neg_amount6","text":"The settlement amount proposed is 560001 rupees.","expected":[]}
+{"id":"hard_neg_branchcode","text":"Internal branch code 483921 is used for routing.","expected":[]}
+{"id":"hard_neg_property","text":"The financed property is Flat 12, MG Road, Bengaluru.","expected":[]}
+{"id":"hard_neg_office","text":"Our office is House 44, Sector 7, Noida for correspondence queries.","expected":[]}
+{"id":"hard_phone_reach","text":"You can reach me on 9876543210 after six.","expected":[{"type":"PHONE","value":"9876543210"}]}
+{"id":"hard_phone_ring","text":"Please ring me on 8765432109 when the refund is done.","expected":[{"type":"PHONE","value":"8765432109"}]}
+{"id":"hard_otp_login","text":"Use verification code 739104 to finish login.","expected":[{"type":"OTP","value":"739104"}]}
+{"id":"passport_ctx","text":"My passport number is A1234567.","expected":[{"type":"PASSPORT","value":"A1234567"}]}
+{"id":"passport_neg_ref","text":"Reference A1234567 was generated for the ticket.","expected":[]}
+{"id":"voter_ctx","text":"My voter ID is ABC1234567.","expected":[{"type":"VOTER_ID","value":"ABC1234567"}]}
+{"id":"voter_neg_product","text":"Product code ABC1234567 is discontinued.","expected":[]}
+{"id":"dl_ctx","text":"Driving license number KA01 2020 1234567.","expected":[{"type":"DRIVING_LICENSE","value":"KA01 2020 1234567"}]}
+{"id":"dl_neg_code","text":"Batch code KA01 2020 1234567 was printed on the form.","expected":[]}
+{"id":"phone_neg_complaint","text":"Complaint number 9876543210 is now closed.","expected":[]}
+{"id":"phone_pos_whatsapp","text":"My WhatsApp number is 9123456789.","expected":[{"type":"PHONE","value":"9123456789"}]}

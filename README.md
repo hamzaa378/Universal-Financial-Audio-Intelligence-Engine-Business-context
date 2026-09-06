@@ -1,115 +1,170 @@
-# Universal Financial Audio Intelligence Engine — AI v3 Privacy/Profanity Upgrade
+# Universal Financial Audio Intelligence Engine — v4.4 GPU-First
 
-AI v3 keeps the confidence-aware financial ASR pipeline from v2 and adds a substantially stronger privacy/safety layer plus automated regression benchmarking.
+v4.4 is a Windows-focused financial-call intelligence prototype with strict GPU ASR, hybrid PII/privacy decisions, protected-audio generation, financial entity extraction, promise-to-pay detection, regulatory phrase screening, and a Streamlit review UI.
 
-## Major v3 changes
-- Context-aware PII detector designed to reduce false positives from generic numbers.
-- Deterministic validators for structured identifiers:
-  - Luhn validation for payment cards.
-  - Verhoeff validation where applicable for Aadhaar-like values.
-  - Exact PAN and IFSC structures.
-  - Email/UPI disambiguation.
-- Context-only detection for ambiguous values such as OTP, CVV, account numbers, PIN codes and DOB.
-- Context-aware NAME and ADDRESS detection to avoid masking explanations such as `Address is required for KYC`.
-- ASR-aware spoken PII handling, e.g. `hamza dot ahmad at gmail dot com` and spoken digit sequences.
-- Conflict resolution so the same character span is not classified as several PII types.
-- Safe metadata output: normal results do not store raw PII values in the PII metadata list.
-- Privacy-safe pipeline output by default. Use `--include-raw` only for controlled debugging.
-- Profanity detection with whole-word/obfuscation handling, including common English and Hinglish forms, while avoiding substring false positives such as `assistant`, `asset`, or `class`.
-- Profanity replacement with `[BLEEP]` in the safe transcript.
-- Windows batch benchmark for functionality, precision/recall/F1, false positives, false negatives and detector throughput.
-- Optional full-audio benchmark for ASR/pipeline real-time factor.
+## Main architecture
 
-## Setup on Windows
-```powershell
-cd Devsoc_AI_v3
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements-core.txt
+```text
+Upload / microphone
+   -> one audio decode (16 kHz mono)
+   -> shared acoustic quality/stress analysis
+   -> Faster-Whisper on CUDA FP16
+   -> time-aligned words + confidence
+   -> PII candidates + strong validators
+        -> ambiguous candidates -> batched semantic AI
+   -> sensitive financial-ID detector
+   -> profanity detector
+   -> financial entity / intent / obligation / compliance layer
+   -> protected transcript
+   -> word-time aligned protected audio (beep or mute)
+   -> Streamlit review UI + benchmark reports
 ```
 
-Core mode does **not** require torchvision or torchaudio.
+## Strict GPU behavior
 
-## Run one call
-```powershell
-python app.py sample_call.wav --model small --output result.json
+Normal startup uses:
+
+```text
+FINAI_DEVICE=cuda
+FINAI_COMPUTE_TYPE=float16
+FINAI_STRICT_GPU=1
 ```
 
-For higher ASR accuracy on an RTX 4060, test:
-```powershell
-python app.py sample_call.wav --model medium --output result.json
+If CUDA inference fails, v4.4 reports the error and stops that request. It does **not** silently re-run Faster-Whisper on CPU. Use `run_frontend_cpu.bat` only when you intentionally want CPU troubleshooting.
+
+## Install
+
+```bat
+install_v4.bat
 ```
 
-Normal output is privacy-safe. Raw transcript output is intentionally opt-in:
-```powershell
-python app.py sample_call.wav --include-raw
-```
-Do not use `--include-raw` for normal UI/logging.
+Core install includes Faster-Whisper, audio processing, Streamlit, and CPU FastEmbed semantic AI. Optional heavier diarization is in `requirements-ai.txt`.
 
-## Run the automated privacy/profanity benchmark
-Double-click or run:
+Optional semantic-AI GPU acceleration:
+
+```bat
+install_semantic_gpu.bat
+```
+
+## Verify GPU
+
+Open a new Command Prompt after changing PATH and check:
+
+```bat
+where cublas64_12.dll
+where cublasLt64_12.dll
+where cudnn64_9.dll
+```
+
+Then:
+
+```bat
+diagnose_gpu.bat
+gpu_smoke_test.bat
+```
+
+## Start frontend
+
+```bat
+run_frontend.bat
+```
+
+Open `http://localhost:8501` and click **Warm up AI models** once before the first call.
+
+Recommended RTX 4060 demo setup:
+
+- Whisper: `small` + `Fast demo` for lowest latency
+- Whisper: `medium` + `Balanced` for stronger accuracy
+- Detection: `Balanced hybrid`
+- Semantic AI: ON after warm-up
+- Full PII redaction: ON
+- Sensitive financial IDs: ON
+- Profanity reduction: ON
+- Protected audio: Bleep tone
+- Speaker diarization: OFF unless pyannote + HF token are configured
+
+## Privacy categories
+
+PII:
+- Email
+- Phone
+- PAN
+- IFSC
+- UPI/VPA
+- Card number (Luhn validated)
+- Aadhaar (checksum/context aware)
+- Bank account number
+- OTP
+- CVV
+- PIN code
+- Date of birth
+- Name (explicit context)
+- Address (explicit/contextual)
+- Passport
+- Voter ID / EPIC
+- Driving licence/license
+
+Sensitive financial identifiers are tracked separately:
+- Transaction/reference ID
+- Loan ID
+- Customer ID
+- Application ID
+- Complaint/grievance/case ID
+
+## Financial understanding
+
+The current layer extracts or screens:
+- EMI amount
+- Outstanding amount
+- Due amount
+- Loan/principal amount
+- Settlement amount
+- Late fee / bounce charge
+- Interest rate / APR
+- Tenure
+- Due/payment date expressions
+- Payment method
+- Payment status
+- Promise-to-pay
+- Repayment difficulty
+- Payment refusal
+- Payment/debt dispute
+- Complaint/fraud/verification/foreclosure/settlement intents
+- Abuse/profanity markers
+- Regulatory risk phrases and selected disclosures
+- Acoustic stress markers
+- Optional speaker diarization
+
+## Efficiency changes in v4.4
+
+- ASR receives the already-decoded waveform instead of decoding the file again.
+- Call-quality and stress-marker features share one acoustic feature pass.
+- Audio masking can reuse the loaded waveform.
+- Semantic AI batches all missing prototype embeddings and caches them.
+- Intent + abusive tone share one semantic inference batch.
+- Ambiguous PII candidates share one semantic privacy-judge batch.
+- Pyannote pipeline is cached when diarization is enabled.
+- UI reports ASR time, text-AI time, total time, and real-time factor (RTF).
+
+## Benchmarks
+
 ```bat
 run_privacy_benchmark.bat
 ```
 
-It performs:
-1. Functional unit tests.
-2. PII detection/masking regression tests.
-3. Profanity detection/reduction regression tests.
-4. Precision, recall, F1, false-discovery rate, false-negative rate and negative-case false-positive rate.
-5. Confidence-threshold sweep.
-6. Text privacy-layer throughput and latency.
+It runs:
+1. unit tests,
+2. PII/profanity precision-recall-FPR regression,
+3. sensitive-financial-ID regression,
+4. optional semantic-AI stress test,
+5. optional full GPU audio benchmark.
 
-Reports are written to:
-```text
-reports/privacy_benchmark.json
-reports/privacy_cases.csv
-```
+Audio folder example:
 
-### Optional full audio/ASR efficiency benchmark
-Put consented/synthetic test calls in a folder and run:
 ```bat
-run_privacy_benchmark.bat "C:\path\to\test_audio" medium
+run_privacy_benchmark.bat "C:\path\to\test_audio" small
 ```
 
-This adds:
-```text
-reports/audio_benchmark.json
-reports/audio_benchmark.csv
-```
-with audio duration, processing time, real-time factor, ASR confidence, PII/profanity counts and overall trust.
+Reports are written under `reports\`.
 
-## Benchmark interpretation
-The included benchmark corpus is **synthetic regression data**, not evidence of production accuracy. A 100% score on these cases means the code passed the cases packaged with this repository. For hackathon validation, add unseen synthetic calls and then a consented/labeled hold-out set of real financial-call audio.
-
-Recommended real evaluation metrics:
-- ASR: WER and CER.
-- Financial entity extraction: precision/recall/F1.
-- PII: entity precision/recall/F1 + negative-case false-positive rate.
-- Profanity: precision/recall/F1 by language and obfuscation type.
-- Diarization: DER.
-- Full pipeline: processing time and real-time factor.
-
-## Threshold tuning
-`detect_pii(text, min_confidence=...)` supports high-precision tuning. The benchmark writes a threshold sweep for 0.80, 0.90, 0.93, 0.95 and 0.97. Raising the threshold generally reduces uncertain detections but can reduce recall.
-
-## Optional AI intent model
-Install `transformers` and `sentencepiece`, then set:
-```powershell
-$env:FINAI_ZERO_SHOT="1"
-```
-For a final product, fine-tune a multilingual financial intent model on a labeled corpus instead of relying only on zero-shot classification.
-
-## Optional diarization
-Install `pyannote.audio`, accept the relevant Hugging Face model terms, configure `HF_TOKEN`, then:
-```powershell
-$env:FINAI_DIARIZATION="1"
-```
-
-## Important limitations
-- Tamper/replay and stress outputs are screening signals, not definitive forensic or psychological findings.
-- Spoken-number reconstruction currently targets digit-by-digit ASR output; expressions such as `ninety-eight lakh...` need a more general spoken-number normalizer.
-- NAME/ADDRESS detection deliberately favors precision and explicit context; unlabeled free-form names/addresses may be missed.
-- Profanity vocabulary should be governed by an organisation-approved policy lexicon before deployment.
-- The bundled benchmark is synthetic and must not be presented as real-world accuracy.
+The bundled test data is synthetic regression data. Do not present its scores as real-world production accuracy. For a defensible evaluation, add consented/labeled or carefully generated noisy financial calls and report WER/CER, PII precision/recall/F1, negative-case FPR, profanity F1, intent/entity F1, diarization error rate, and end-to-end RTF.

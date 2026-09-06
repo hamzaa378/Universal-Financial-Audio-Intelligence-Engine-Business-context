@@ -1,0 +1,3 @@
+# Optional semantic-AI GPU package. Use install_semantic_gpu.bat instead of manually
+# mixing CPU and GPU FastEmbed/ONNX Runtime packages.
+fastembed-gpu>=0.7

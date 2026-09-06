@@ -1,0 +1,13 @@
+{
+  "status": "skipped",
+  "reason": "Semantic AI unavailable",
+  "engine": {
+    "available": false,
+    "model": null,
+    "backend": "rules fallback",
+    "provider": null,
+    "cached_vectors": 0,
+    "error": "ModuleNotFoundError: No module named 'fastembed'"
+  },
+  "note": "Install requirements-ai-lite.txt and run once with internet access to cache the embedding model."
+}

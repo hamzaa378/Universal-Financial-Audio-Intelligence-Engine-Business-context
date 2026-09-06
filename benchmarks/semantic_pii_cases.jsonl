@@ -1,0 +1,8 @@
+{"id":"sem_account_1","text":"My banking details for the refund are 001234567890.","expected":[{"type":"ACCOUNT_NUMBER","value":"001234567890"}]}
+{"id":"sem_pin_1","text":"I live in Pune 411001 and need the statement delivered there.","expected":[{"type":"PINCODE","value":"411001"}]}
+{"id":"sem_address_1","text":"I stay at Flat 18, Lake View Road, Pune and receive statements there.","expected":[{"type":"ADDRESS","value":"Flat 18, Lake View Road, Pune and receive statements there"}]}
+{"id":"sem_otp_1","text":"Use 483921 to verify the login and then continue.","expected":[{"type":"OTP","value":"483921"}]}
+{"id":"sem_neg_property","text":"The mortgage property is Flat 18, Lake View Road, Pune and is under valuation.","expected":[]}
+{"id":"sem_neg_amount","text":"Use 483921 rupees as the approved loan amount in the calculation.","expected":[]}
+{"id":"sem_neg_ref","text":"Banking software reference 001234567890 appears in the audit log.","expected":[]}
+{"id":"sem_neg_branchpin","text":"The branch office is in Pune 411001 but the customer lives elsewhere.","expected":[]}

@@ -1,0 +1,39 @@
+DEVSOC AI v4.4 GPU QUICK START
+==============================
+
+1. Open a NEW Command Prompt after changing CUDA/cuDNN PATH.
+
+2. Confirm:
+   where cublas64_12.dll
+   where cublasLt64_12.dll
+   where cudnn64_9.dll
+
+3. Install project dependencies once:
+   install_v4.bat
+
+4. Diagnose GPU:
+   diagnose_gpu.bat
+
+5. Optional real inference test:
+   gpu_smoke_test.bat
+
+6. Launch strict GPU frontend:
+   run_frontend.bat
+
+7. Browser:
+   http://localhost:8501
+
+8. Click "Warm up AI models" once.
+
+Expected sidebar:
+   Planned ASR backend: CUDA / float16
+   Strict GPU mode: ON — no silent CPU fallback
+
+Expected result metadata:
+   ASR backend used: CUDA / float16 / fast (or balanced)
+
+Optional semantic-AI GPU acceleration:
+   install_semantic_gpu.bat
+
+If you intentionally need CPU troubleshooting:
+   run_frontend_cpu.bat

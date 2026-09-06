@@ -1,0 +1,10 @@
+{"id":"sid1","text":"Transaction reference TXN-88991122 was successful.","expected":[{"type":"TRANSACTION_ID","value":"TXN-88991122"}]}
+{"id":"sid2","text":"Loan ID LN-2026-778899 is active.","expected":[{"type":"LOAN_ID","value":"LN-2026-778899"}]}
+{"id":"sid3","text":"Customer ID CUST-552211 was verified.","expected":[{"type":"CUSTOMER_ID","value":"CUST-552211"}]}
+{"id":"sid4","text":"Application reference APP/2026/778811 is pending.","expected":[{"type":"APPLICATION_ID","value":"APP/2026/778811"}]}
+{"id":"sid5","text":"Complaint number GRV-778899 has been escalated.","expected":[{"type":"COMPLAINT_ID","value":"GRV-778899"}]}
+{"id":"sidn1","text":"The transaction amount is Rs 88991122.","expected":[]}
+{"id":"sidn2","text":"The loan amount is INR 552211.","expected":[]}
+{"id":"sidn3","text":"Customer satisfaction score is 778899.","expected":[]}
+{"id":"sidn4","text":"Application fee is 778811 rupees.","expected":[]}
+{"id":"sidn5","text":"Complaint volume reached 778899 this quarter.","expected":[]}

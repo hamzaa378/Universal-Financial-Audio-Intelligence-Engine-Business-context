@@ -1,0 +1,96 @@
+{
+  "cases": 10,
+  "tp": 5,
+  "fp": 0,
+  "fn": 0,
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1": 1.0,
+  "negative_cases": 5,
+  "negative_cases_with_fp": 0,
+  "negative_case_false_positive_rate": 0.0,
+  "mean_ms": 0.022375999969881377,
+  "rows": [
+    {
+      "id": "sid1",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "detections": [
+        "TRANSACTION_ID"
+      ]
+    },
+    {
+      "id": "sid2",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "detections": [
+        "LOAN_ID"
+      ]
+    },
+    {
+      "id": "sid3",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "detections": [
+        "CUSTOMER_ID"
+      ]
+    },
+    {
+      "id": "sid4",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "detections": [
+        "APPLICATION_ID"
+      ]
+    },
+    {
+      "id": "sid5",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "detections": [
+        "COMPLAINT_ID"
+      ]
+    },
+    {
+      "id": "sidn1",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "detections": []
+    },
+    {
+      "id": "sidn2",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "detections": []
+    },
+    {
+      "id": "sidn3",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "detections": []
+    },
+    {
+      "id": "sidn4",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "detections": []
+    },
+    {
+      "id": "sidn5",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "detections": []
+    }
+  ],
+  "note": "Synthetic sensitive-financial-ID regression set; separate from classic PII metrics."
+}

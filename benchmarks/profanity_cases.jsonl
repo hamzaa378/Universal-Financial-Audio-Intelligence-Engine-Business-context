@@ -22,3 +22,8 @@
 {"id": "pn8", "text": "The branch is in Assam.", "expected": []}
 {"id": "pn9", "text": "The customer passed KYC.", "expected": []}
 {"id": "pn10", "text": "Please follow the process and submit the form.", "expected": []}
+{"id":"p15","text":"He shouted gaandu and disconnected.","expected":["gandu"]}
+{"id":"p16","text":"The caller used bakchodi repeatedly.","expected":["bakchod"]}
+{"id":"p17","text":"He said madharchod on the call.","expected":["madarchod"]}
+{"id":"pn11","text":"The customer discussed Gandhi Nagar branch details.","expected":[]}
+{"id":"pn12","text":"The assistant classified the asset correctly.","expected":[]}

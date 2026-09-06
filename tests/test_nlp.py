@@ -17,6 +17,8 @@ class PrivacyNLPTests(unittest.TestCase):
 
     def test_context_false_positive_reduction(self):
         self.assertFalse(detect_pii('The order number is 9876543210.'))
+        self.assertFalse(detect_pii('Case number 9876543210 was escalated.'))
+        self.assertFalse(detect_pii('9876543210'))
         self.assertFalse(detect_pii('Address is required for KYC.'))
         self.assertFalse(detect_pii('The EMI amount is 483921 rupees.'))
 
@@ -31,6 +33,7 @@ class PrivacyNLPTests(unittest.TestCase):
         meta=public_pii_metadata(detect_pii(t))
         self.assertNotIn('value',meta[0])
         self.assertNotIn('ABCDE1234F',str(meta))
+        self.assertNotIn('1234F', meta[0]['masked_value'])
 
     def test_profanity_and_benign_substrings(self):
         self.assertTrue(detect_profanity('The caller said f**k.'))
