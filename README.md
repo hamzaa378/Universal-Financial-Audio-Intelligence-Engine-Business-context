@@ -1,6 +1,6 @@
-# Universal Financial Audio Intelligence Engine — v4.10 STT-Guard Privacy Hybrid
+# Universal Financial Audio Intelligence Engine — v4.11 Reliability-Guard Privacy Hybrid
 
-v4.10 keeps the v4.9 ASR-robust detector and adds STT-specific safety guards for the remaining real-speech failures: full owned-span masking for raw fallbacks, stronger spoken-as/format/example vetoes, and expectation-aware targeted ASR re-decoding for sensitive replies that disappear from the primary transcript. If the alternate decode still cannot recover the value, v4.10 can conservatively protect a short audio window without inventing transcript characters.
+v4.11 keeps the v4.10 STT guard and strengthens reliability around real ASR failures: expected fields are one-shot, raw fallback spans have hard clause/token/character boundaries, malformed owned fields can trigger same-sentence recovery, phonetic IFSC dictation can survive one ASR punctuation split, and the recovery controller exposes privacy-safe telemetry. An opt-in raw-vs-safe debug bundle can determine whether missing text came from ASR or from redaction without enabling raw logging by default.
 
 ## Processing architecture
 
@@ -37,6 +37,20 @@ Audio / microphone
   -> Streamlit review UI
 ```
 
+
+## v4.11 reliability-guard improvements
+
+- **One-shot typed expected-field state:** a field expectation is consumed once and is never propagated when the introducing sentence already supplied that field. This prevents `CVV 391` from contaminating later values such as `482 transactions`.
+- **Quantity-role veto for CVV:** 3–4 digit values followed by roles such as transactions, records, items, units, rupees, pages, or samples are not CVV candidates merely because CVV appeared earlier in the clause.
+- **Hard raw-fallback span authority:** ownership-gated fallbacks are clamped to the current field clause, next known role, and type-specific token/character budgets. Confidence cannot override these boundaries.
+- **Two-lane recovery controller:** recovery now handles both previous-field follow-up answers and malformed same-sentence owned fields such as `my registered name is 2210`.
+- **Broader recovery coverage:** NAME, PAN, IFSC, UPI, EMAIL, PHONE, Aadhaar, card, account, DOB, passport, driving licence, address and other supported core types can schedule targeted recovery when explicit ownership exists but primary ASR produced no accepted value.
+- **Cross-punctuation IFSC protection:** a single ASR sentence break inside phonetic IFSC dictation can be treated as one bounded owned span without merging unrelated following fields.
+- **Recovery telemetry:** reports planned/attempted/recovered/guarded/unresolved windows plus targeted-decode inference time; alternate transcript text is never included in normal telemetry.
+- **Opt-in raw/final debug comparison:** `FINAI_PRIVACY_DEBUG_ARTIFACTS=1` writes raw ASR, safe transcript, redaction spans, recovery telemetry and hashes to a diagnostic folder. It is disabled by default because the raw file contains PII.
+- **NER installer path fix retained:** the optional NER installer adds the project root to `PYTHONPATH` and the helper script is independently import-safe.
+
+See `V4_11_CHANGES.md` and `LIMITATIONS_V4_11.md`.
 
 ## v4.10 STT-guard improvements
 

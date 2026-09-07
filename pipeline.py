@@ -22,6 +22,7 @@ from decision_ai.utterance_ai import analyze_utterance
 from audio_privacy import create_protected_audio
 from nlp.token_alignment import attach_entity_tokens
 from config import SETTINGS
+from privacy_debug import write_privacy_debug_bundle
 
 
 def _trust(asr_conf, quality, intent_conf, pii_conf=1.0):
@@ -250,7 +251,7 @@ def run_pipeline(
     timing["privacy_and_nlp"]=(time.perf_counter()-t)*1000
 
     protected_audio=None
-    privacy_recovery={"enabled":False,"plans":0,"audit":[],"audio_interval_count":0}
+    privacy_recovery={"enabled":False,"plans":0,"audit":[],"audio_interval_count":0,"telemetry":{"windows_planned":0,"windows_attempted":0,"recovered":0,"guarded":0,"unresolved":0,"decode_inference_ms":0.0,"total_ms":0.0}}
     if create_audio_output:
         t=time.perf_counter()
         recovery_enabled=SETTINGS.privacy_redecode if asr_privacy_recovery is None else bool(asr_privacy_recovery)
@@ -268,12 +269,14 @@ def run_pipeline(
                     "enabled":True,"plans":int(rr.get("plans",0)),
                     "audit":list(rr.get("audit",[])),
                     "audio_interval_count":len(recovery_intervals),
+                    "telemetry":dict(rr.get("telemetry",{})),
                 }
             except Exception as exc:
                 # Privacy recovery is an additional guard. A failure must never discard
                 # the normal detector/audio-redaction result.
                 privacy_recovery={
                     "enabled":True,"plans":0,"audit":[],"audio_interval_count":0,
+                    "telemetry":{"windows_planned":0,"windows_attempted":0,"recovered":0,"guarded":0,"unresolved":0,"decode_inference_ms":0.0,"total_ms":0.0},
                     "error":f"{type(exc).__name__}: {exc}",
                 }
             timing["privacy_redecode"]=(time.perf_counter()-rt)*1000
@@ -327,6 +330,20 @@ def run_pipeline(
     result["performance"]={k:round(v,3) for k,v in timing.items()}
     result["performance"]["audio_duration_s"]=round(len(audio)/float(sr),3)
     result["performance"]["real_time_factor"]=round((timing["total"]/1000)/(len(audio)/float(sr)),4) if len(audio) else None
+    if SETTINGS.privacy_debug_artifacts:
+        try:
+            debug_entities=(list(internal_privacy.get("pii",[]))+list(internal_privacy.get("financial_ids",[]))+list(internal_privacy.get("profanity",[])))
+            result["privacy"]["debug_bundle"]=write_privacy_debug_bundle(
+                str(asr.get("text","") or ""),
+                str(text_analysis.get("safe_text","") or ""),
+                debug_entities,
+                privacy_recovery,
+                base_dir=SETTINGS.privacy_debug_dir,
+            )
+        except Exception as exc:
+            result["privacy"]["debug_bundle"]={"enabled":True,"error":f"{type(exc).__name__}: {exc}"}
+    else:
+        result["privacy"]["debug_bundle"]={"enabled":False}
     if include_raw:
         result["privacy"]["warning"]="Raw transcript requested: output may contain PII/profanity. Do not use this mode for normal UI/logging."
     return result

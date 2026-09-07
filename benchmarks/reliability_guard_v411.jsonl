@@ -1,0 +1,8 @@
+{"id":"v411_cvv_quantity_same_sentence","text":"The CVV on my card is 391, there were 482 transactions yesterday.","expected":[{"type":"CVV","value":"391"}]}
+{"id":"v411_cvv_quantity_negative","text":"There were 482 transactions yesterday.","expected":[]}
+{"id":"v411_cvv_records_negative","text":"The CVV is printed on the card. 391 records were processed yesterday.","expected":[]}
+{"id":"v411_cross_punctuation_ifsc","text":"My IFSC is Hotel Delta Foxtrot. Charlie 001234 and my address is 15 Rose Road, Pune 411001.","expected":[{"type":"IFSC","value":"Hotel Delta Foxtrot. Charlie 001234"},{"type":"ADDRESS","value":"15 Rose Road, Pune 411001"}]}
+{"id":"v411_dl_hard_boundary","text":"My driving license number is Carnitaka0120210012345, product batch KAO120210012345, past inspection.","expected":[{"type":"DRIVING_LICENSE","value":"Carnitaka0120210012345"}]}
+{"id":"v411_public_batch_negative","text":"Product batch KAO120210012345 passed inspection.","expected":[]}
+{"id":"v411_account_transaction_boundary","text":"My account number is 876543210987 and the transaction ID is also 765432109876.","expected":[{"type":"ACCOUNT_NUMBER","value":"876543210987"}]}
+{"id":"v411_phone_complaint_boundary","text":"My phone number is 9123456789 and the complaint ID is also 9988776655.","expected":[{"type":"PHONE","value":"9123456789"}]}

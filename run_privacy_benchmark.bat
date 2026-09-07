@@ -12,35 +12,35 @@ if errorlevel 1 (
 if not exist reports mkdir reports
 
 echo ============================================================
-echo 1/10 Functional unit tests
+echo 1/11 Functional unit tests
 echo ============================================================
 %PYTHON% -m unittest discover -s tests -p "test_*.py" -v
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 2/10 PII + profanity accuracy, FPR and deterministic speed
+echo 2/11 PII + profanity accuracy, FPR and deterministic speed
 echo ============================================================
 %PYTHON% tools\evaluate_privacy.py --iterations 200 --json reports\privacy_benchmark.json --csv reports\privacy_cases.csv
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 3/10 v4.6 context/false-positive stress benchmark
+echo 3/11 v4.6 context/false-positive stress benchmark
 echo ============================================================
 %PYTHON% tools\evaluate_privacy.py --pii benchmarks\context_precision_v46.jsonl --iterations 200 --json reports\context_precision_v46.json --csv reports\context_precision_v46.csv
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 4/10 v4.7 context/recall stress benchmark
+echo 4/11 v4.7 context/recall stress benchmark
 echo ============================================================
 %PYTHON% tools\evaluate_privacy.py --pii benchmarks\context_recall_v47.jsonl --iterations 200 --json reports\context_recall_v47.json --csv reports\context_recall_v47.csv
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 5/10 v4.8 precision-guard regression
+echo 5/11 v4.8 precision-guard regression
 echo ============================================================
 %PYTHON% tools\evaluate_privacy.py --pii benchmarks\precision_guard_v48.jsonl --iterations 200 --json reports\precision_guard_v48.json --csv reports\precision_guard_v48.csv
 if errorlevel 1 goto :fail
@@ -48,35 +48,42 @@ if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 6/10 v4.9 ASR-robust privacy regression
+echo 6/11 v4.9 ASR-robust privacy regression
 echo ============================================================
 %PYTHON% tools\evaluate_privacy.py --pii benchmarks\asr_robust_v49.jsonl --iterations 200 --json reports\asr_robust_v49.json --csv reports\asr_robust_v49.csv
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 7/10 v4.10 STT-guard precision regression
+echo 7/11 v4.10 STT-guard precision regression
 echo ============================================================
 %PYTHON% tools\evaluate_privacy.py --pii benchmarks\stt_guard_v410.jsonl --iterations 200 --json reports\stt_guard_v410.json --csv reports\stt_guard_v410.csv
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 8/10 Sensitive financial identifier regression
+echo 8/11 v4.11 reliability-guard regression
+echo ============================================================
+%PYTHON% tools\evaluate_privacy.py --pii benchmarks\reliability_guard_v411.jsonl --iterations 200 --json reports\reliability_guard_v411.json --csv reports\reliability_guard_v411.csv
+if errorlevel 1 goto :fail
+
+echo.
+echo ============================================================
+echo 9/11 Sensitive financial identifier regression
 echo ============================================================
 %PYTHON% tools\evaluate_sensitive_ids.py
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 9/10 Optional batched semantic-AI privacy stress test
+echo 10/11 Optional batched semantic-AI privacy stress test
 echo ============================================================
 %PYTHON% tools\evaluate_semantic_privacy.py
 if errorlevel 1 goto :fail
 
 echo.
 echo ============================================================
-echo 10/10 Optional full audio / GPU ASR benchmark
+echo 11/11 Optional full audio / GPU ASR benchmark
 echo ============================================================
 if "%~1"=="" (
   echo Skipped. To benchmark custom audio, run:
@@ -94,7 +101,7 @@ if errorlevel 1 goto :fail
 
 :success
 echo.
-echo [PASS] v4.10 benchmark completed. Open the reports folder for JSON/CSV results.
+echo [PASS] v4.11 benchmark completed. Open the reports folder for JSON/CSV results.
 pause
 exit /b 0
 

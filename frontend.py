@@ -249,13 +249,29 @@ def _show_last_audio_result():
                 st.info("No sensitive audio intervals were detected; the protected copy contains no bleep/mute sections.")
 
     recovery=r.get("privacy",{}).get("asr_privacy_recovery") or {}
-    if recovery.get("enabled") and recovery.get("plans",0):
-        st.info(
-            f"STT privacy recovery checked {recovery.get('plans',0)} unresolved expected response window(s); "
-            f"{recovery.get('audio_interval_count',0)} audio guard interval(s) were added."
-        )
-        with st.expander("STT privacy recovery audit"):
-            st.dataframe(recovery.get("audit",[]),width="stretch",hide_index=True)
+    if recovery.get("enabled"):
+        tel=recovery.get("telemetry") or {}
+        if recovery.get("plans",0):
+            st.info(
+                f"STT privacy recovery planned {tel.get('windows_planned',recovery.get('plans',0))} window(s), "
+                f"attempted {tel.get('windows_attempted',0)}, recovered {tel.get('recovered',0)}, "
+                f"guarded {tel.get('guarded',0)}; targeted decode time "
+                f"{float(tel.get('decode_inference_ms',0.0) or 0.0):.1f} ms."
+            )
+            with st.expander("STT privacy recovery audit"):
+                audit=recovery.get("audit",[])
+                if audit:
+                    st.dataframe(audit,width="stretch",hide_index=True)
+                else:
+                    st.info("No recovery audit rows were produced.")
+        else:
+            st.caption("STT privacy recovery: no unresolved owned sensitive windows required a second decode.")
+
+    debug=r.get("privacy",{}).get("debug_bundle") or {}
+    if debug.get("enabled"):
+        st.warning(debug.get("warning","Privacy debug artifacts are enabled and may contain raw PII."))
+        with st.expander("Privacy debug artifact paths"):
+            st.json(debug)
 
     show_analysis(_analysis_view(r))
 

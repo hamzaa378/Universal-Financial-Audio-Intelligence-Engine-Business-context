@@ -1,4 +1,4 @@
-"""Expectation-aware ASR privacy recovery (v4.10).
+"""Expectation-aware ASR privacy recovery (v4.11).
 
 This module is deliberately audio-privacy oriented.  It never invents or publishes a
 missing identifier.  When the primary transcript strongly implies that the next short
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from typing import Iterable
 
 import numpy as np
@@ -29,6 +30,38 @@ _SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|$)")
 _RECOVERY_RESPONSE = re.compile(
     r"(?i)^\s*(?:mine\b|it\s+(?:is|was)\b|i\s+(?:received|got|have|use|said|gave)\b|"
     r"the\s+(?:number|code|value|id)\s+(?:is|was)\b)"
+)
+
+_NO_VALUE_RESPONSE = re.compile(
+    r"(?i)^\s*(?:not\s+(?:available|provided|known)|unavailable|unknown|none|n/?a|"
+    r"prefer\s+not\s+to\s+(?:say|provide|share)|do\s+not\s+have)\b"
+)
+# Explicit personal assignment starts used only to *plan* recovery when primary ASR did
+# not yield a credible entity. They do not themselves create a text redaction.
+_OWNED_RECOVERY_STARTS = (
+    ("NAME",re.compile(r"(?i)\b(?:my\s+(?:(?:full|registered|legal|official|preferred)\s+)?name|name\s+on\s+my\s+(?:account|card|passport))\s+(?:is|:|=)\s*")),
+    ("PHONE",re.compile(r"(?i)\b(?:my\s+(?:(?:registered|alternate|secondary|backup|personal|work)\s+)?(?:phone|mobile|contact)(?:\s+number)?\s+(?:is|:|=)|(?:call|reach|contact|text|message|sms)\s+me\s+(?:at|on))\s*")),
+    ("EMAIL",re.compile(r"(?i)\b(?:my\s+(?:(?:registered|alternate|secondary|personal|work)\s+)?(?:email|e-mail)(?:\s+address)?|mail\s+me|email\s+me)\s+(?:is|at|:|=)?\s*")),
+    ("PAN",re.compile(r"(?i)\bmy\s+(?:pan|permanent\s+account\s+number)(?:\s+number)?\s+(?:is|:|=)\s*")),
+    ("AADHAAR",re.compile(r"(?i)\bmy\s+(?:aadhaar|aadhar)(?:\s+number)?\s+(?:is|:|=)\s*")),
+    ("IFSC",re.compile(r"(?i)\bmy\s+(?:bank\s+)?ifsc(?:\s+code)?\s+(?:is|:|=)\s*")),
+    ("UPI",re.compile(r"(?i)\bmy\s+(?:upi(?:\s+(?:id|address))?|vpa)\s+(?:is|:|=)\s*")),
+    ("CARD",re.compile(r"(?i)\bmy\s+(?:(?:credit|debit)\s+)?card(?:\s+number)?\s+(?:is|:|=)\s*")),
+    ("CVV",re.compile(r"(?i)\b(?:my\s+cvv|the\s+cvv\s+on\s+my\s+card)\s+(?:is|:|=)\s*")),
+    ("OTP",re.compile(r"(?i)\bmy\s+(?:otp|verification\s+code|one[- ]time\s+(?:password|passcode))\s+(?:is|:|=)\s*")),
+    ("ACCOUNT_NUMBER",re.compile(r"(?i)\bmy\s+(?:bank\s+)?account(?:\s+number)?\s+(?:is|:|=)\s*")),
+    ("PINCODE",re.compile(r"(?i)\bmy\s+(?:pin\s*code|pincode|postal\s+code|zip\s+code)\s+(?:is|:|=)\s*")),
+    ("DOB",re.compile(r"(?i)\bmy\s+(?:dob|date\s+of\s+birth|birth\s+date)\s+(?:is|:|=)\s*")),
+    ("PASSPORT",re.compile(r"(?i)\bmy\s+passport(?:\s+number)?\s+(?:is|:|=)\s*")),
+    ("DRIVING_LICENSE",re.compile(r"(?i)\bmy\s+(?:driving\s+licen[cs]e|driver'?s\s+licen[cs]e|dl)(?:\s+number)?\s+(?:is|:|=)\s*")),
+    ("VOTER_ID",re.compile(r"(?i)\bmy\s+(?:voter\s*(?:id|card)|epic(?:\s+(?:id|number))?)\s+(?:is|:|=)\s*")),
+    ("ADDRESS",re.compile(r"(?i)\bmy\s+(?:(?:residential|permanent|current|registered|mailing|billing|delivery)\s+)?address\s+(?:is|:|=)\s*")),
+)
+_RECOVERY_NEXT_FIELD = re.compile(
+    r"(?i)(?:,\s*|\s+)(?:and\s+)?(?:(?:my|the|your)\s+)?(?:name|phone|mobile|email|account|ifsc|pan|upi|aadhaar|aadhar|otp|cvv|address|dob|date\s+of\s+birth|passport|driving\s+licen[cs]e|card|transaction|complaint|order|reference|product\s+batch)\b"
+)
+_PHONETIC_CONTINUATION = re.compile(
+    r"(?i)^\s*(?:alpha|bravo|charlie|delta|echo|foxtrot|golf|hotel|india|juliett?|kilo|lima|mike|november|oscar|papa|quebec|romeo|sierra|tango|uniform|victor|whiskey|x-?ray|yankee|zulu|zero|oh|one|two|three|four|five|six|seven|eight|nine|[A-Z]|\d)\b"
 )
 
 _FIELD_LABEL = {
@@ -79,39 +112,131 @@ def _span_time(asr: dict, start: int, end: int) -> tuple[float,float,float] | No
     return None
 
 
+def _accepted_in_span(pii: list[dict], kind: str, start: int, end: int) -> bool:
+    return any(x.get("type")==kind and _overlap(int(x.get("start",0)),int(x.get("end",0)),start,end) for x in pii)
+
+
+def _owned_assignments(text: str, start: int=0, end: int | None=None) -> list[dict]:
+    end=len(text) if end is None else end
+    out=[]
+    window=text[start:end]
+    for kind,pat in _OWNED_RECOVERY_STARTS:
+        for m in pat.finditer(window):
+            abs_start=start+m.start(); abs_end=start+m.end()
+            # Do not reinterpret the word "card" inside a CVV/CVC assignment as a
+            # separate card-number ownership field ("CVV on my card is 391").
+            if kind=="CARD" and re.search(r"(?i)\b(?:cvv|cvc|card\s+security\s+code|verification\s+value)\b",text[max(start,abs_start-36):abs_start]):
+                continue
+            out.append({"type":kind,"label_start":abs_start,"value_start":abs_end})
+    return sorted(out,key=lambda x:x["label_start"])
+
+
+def _bounded_owned_char_end(text: str, value_start: int, sentence_end: int) -> int:
+    end=sentence_end
+    m=_RECOVERY_NEXT_FIELD.search(text,value_start,end)
+    if m:
+        end=min(end,m.start())
+    return max(value_start,end)
+
+
+def _append_plan(plans: list[dict], asr: dict, *, kind: str, start: int, end: int, reason: str, source: str) -> None:
+    if end<=start:
+        return
+    timing=_span_time(asr,start,end)
+    if not timing:
+        return
+    ts,te,conf=timing
+    max_s=_MAX_UNCERTAIN_SECONDS.get(kind,3.0)
+    te=min(te,ts+max_s+0.7)
+    candidate={
+        "type":kind,"char_start":start,"char_end":end,
+        "time_start":max(0.0,ts-0.20),"time_end":max(ts,te+0.20),
+        "primary_alignment_confidence":round(conf,4),
+        "reason":reason,"source":source,
+    }
+    # De-duplicate same-type windows that substantially overlap.
+    for p in plans:
+        if p["type"]==kind and _overlap(int(p["char_start"]),int(p["char_end"]),start,end):
+            if (end-start)>(int(p["char_end"])-int(p["char_start"])):
+                p.update(candidate)
+            return
+    plans.append(candidate)
+
+
 def plan_privacy_recovery(asr: dict, accepted_pii: Iterable[dict], *, max_windows: int=4) -> list[dict]:
-    """Find high-risk expected-field responses with no accepted value in primary text."""
+    """Plan bounded recovery windows for unresolved sensitive ownership.
+
+    v4.11 has two recovery lanes:
+    1) a one-shot follow-up expectation ("Please enter your CVV. Mine is ..."); and
+    2) an explicit owned field whose primary ASR value is malformed ("my name is 2210").
+
+    Plans never expose or invent the value; they only select a small audio window for a
+    second decode or, on failure, a conservative audio guard.
+    """
     text=str(asr.get("text","") or "")
     spans=_sentence_spans(text)
     pii=list(accepted_pii or [])
     plans=[]
+
+    # Lane A: one-shot previous-sentence expectation. If the introducing sentence
+    # already contains an accepted value, or is itself a personal assignment, the
+    # expectation is satisfied/owned there and is never propagated.
     for i,(s0,s1) in enumerate(spans[:-1]):
-        expected=infer_expected_type(text[s0:s1])
+        previous=text[s0:s1]
+        expected=infer_expected_type(previous)
         if not expected:
+            continue
+        if _accepted_in_span(pii,expected,s0,s1):
+            continue
+        if any(x["type"]==expected for x in _owned_assignments(text,s0,s1)):
             continue
         n0,n1=spans[i+1]
         response=text[n0:n1]
-        if not _RECOVERY_RESPONSE.search(response):
+        if not _RECOVERY_RESPONSE.search(response) or _NO_VALUE_RESPONSE.search(response):
             continue
-        if any(x.get("type")==expected and _overlap(int(x.get("start",0)),int(x.get("end",0)),n0,n1) for x in pii):
+        if _accepted_in_span(pii,expected,n0,n1):
             continue
-        timing=_span_time(asr,n0,n1)
-        if not timing:
+        _append_plan(plans,asr,kind=expected,start=n0,end=n1,
+                     reason="one_shot_expected_field_missing",source="followup_expectation")
+
+    # Lane B: same-sentence explicit ownership with no accepted entity. This is the
+    # main protection for ASR corruption such as "my registered name is 2210".
+    for assignment in _owned_assignments(text):
+        kind=assignment["type"]
+        value_start=int(assignment["value_start"])
+        sent=None; sent_i=None
+        for i,(a,b) in enumerate(spans):
+            if a<=value_start<=b:
+                sent=(a,b); sent_i=i; break
+        if not sent:
             continue
-        ts,te,conf=timing
-        # Do not re-decode a huge ASR sentence.  The conservative fallback is also
-        # capped by field type below.
-        max_s=_MAX_UNCERTAIN_SECONDS.get(expected,3.0)
-        te=min(te,ts+max_s+0.7)
-        plans.append({
-            "type":expected,"char_start":n0,"char_end":n1,
-            "time_start":max(0.0,ts-0.20),"time_end":max(ts,min(te+0.20,te+0.20)),
-            "primary_alignment_confidence":round(conf,4),
-            "reason":"expected_field_missing_in_primary_asr",
-        })
-        if len(plans)>=max_windows:
-            break
-    return plans
+        s0,s1=sent
+        end=_bounded_owned_char_end(text,value_start,s1)
+        tail=text[value_start:end]
+        if _NO_VALUE_RESPONSE.search(tail):
+            continue
+        if _accepted_in_span(pii,kind,value_start,end):
+            continue
+
+        reason="owned_field_unresolved_primary_asr"
+        # IFSC/PAN/passport/DL dictation is especially prone to Whisper inserting a
+        # period mid-value. Permit exactly one short phonetic/alphanumeric continuation
+        # when no new field begins.
+        if kind in {"IFSC","PAN","PASSPORT","DRIVING_LICENSE"} and sent_i is not None and sent_i+1<len(spans):
+            n0,n1=spans[sent_i+1]
+            next_text=text[n0:n1]
+            if _PHONETIC_CONTINUATION.search(next_text) and not _RECOVERY_NEXT_FIELD.match(next_text):
+                extended=_bounded_owned_char_end(text,n0,n1)
+                end=max(end,extended)
+                reason="owned_field_cross_punctuation_unresolved"
+        _append_plan(plans,asr,kind=kind,start=value_start,end=end,reason=reason,source="owned_field")
+
+    # Prioritize smaller/high-risk windows and respect the configured inference cap.
+    risk={"CVV":0,"OTP":1,"PAN":2,"IFSC":2,"AADHAAR":2,"CARD":2,"ACCOUNT_NUMBER":2,
+          "PHONE":3,"EMAIL":3,"UPI":3,"PASSPORT":3,"DRIVING_LICENSE":3,"NAME":4,
+          "DOB":4,"ADDRESS":5,"PINCODE":4,"VOTER_ID":4}
+    plans.sort(key=lambda p:(risk.get(p["type"],9),float(p["time_end"])-float(p["time_start"]),p["time_start"]))
+    return plans[:max(0,max_windows)]
 
 
 def _backend_model(model_name: str | None):
@@ -214,18 +339,31 @@ def recover_privacy_audio_intervals(
     audio: np.ndarray, sr: int, asr: dict, accepted_pii: Iterable[dict],
     *, model_name: str | None=None, max_windows: int=4, conservative_on_failure: bool=True,
 ) -> dict:
-    """Return audio-only redaction intervals for PII lost by the primary transcript."""
+    """Return audio-only redaction intervals plus privacy-safe recovery telemetry."""
+    total0=time.perf_counter()
     plans=plan_privacy_recovery(asr,accepted_pii,max_windows=max_windows)
     intervals=[]; audit=[]
+    telemetry={
+        "windows_planned":len(plans),"windows_attempted":0,"recovered":0,
+        "guarded":0,"unresolved":0,"decode_inference_ms":0.0,"total_ms":0.0,
+    }
     for plan in plans:
+        telemetry["windows_attempted"]+=1
+        dt=time.perf_counter()
         alt=_decode_window(audio,sr,plan,model_name)
+        decode_ms=(time.perf_counter()-dt)*1000.0
+        telemetry["decode_inference_ms"]+=decode_ms
         confirmed=_confirm_expected(plan["type"],alt)
         if confirmed:
             intervals.append(confirmed)
+            telemetry["recovered"]+=1
             audit.append({
                 "type":plan["type"],"status":"confirmed_alternate_decode",
+                "source":plan.get("source"),"reason":plan.get("reason"),
+                "time_start":round(float(plan["time_start"]),3),"time_end":round(float(plan["time_end"]),3),
                 "primary_alignment_confidence":plan["primary_alignment_confidence"],
                 "alternate_asr_confidence":confirmed.get("alignment_confidence"),
+                "decode_ms":round(decode_ms,3),"alternate_text_present":bool(alt.get("text")),
             })
             continue
         if conservative_on_failure:
@@ -239,11 +377,18 @@ def recover_privacy_audio_intervals(
                 "recovery_status":"conservative_audio_guard",
             })
             status="conservative_audio_guard"
+            telemetry["guarded"]+=1
         else:
             status="unresolved"
+            telemetry["unresolved"]+=1
         audit.append({
-            "type":plan["type"],"status":status,
+            "type":plan["type"],"status":status,"source":plan.get("source"),"reason":plan.get("reason"),
+            "time_start":round(float(plan["time_start"]),3),"time_end":round(float(plan["time_end"]),3),
             "primary_alignment_confidence":plan["primary_alignment_confidence"],
-            "alternate_decode_error":bool(alt.get("error")),
+            "alternate_decode_error":bool(alt.get("error")),"decode_ms":round(decode_ms,3),
+            "alternate_text_present":bool(alt.get("text")),
         })
-    return {"plans":len(plans),"intervals":intervals,"audit":audit}
+    telemetry["decode_inference_ms"]=round(float(telemetry["decode_inference_ms"]),3)
+    telemetry["total_ms"]=round((time.perf_counter()-total0)*1000.0,3)
+    return {"plans":len(plans),"intervals":intervals,"audit":audit,"telemetry":telemetry}
+

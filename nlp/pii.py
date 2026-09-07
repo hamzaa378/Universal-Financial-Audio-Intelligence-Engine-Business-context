@@ -1,4 +1,4 @@
-"""Privacy-first PII detection for financial-call transcripts (v4.10).
+"""Privacy-first PII detection for financial-call transcripts (v4.11).
 
 Pipeline:
 ASR text -> ASR-aware normalization candidates -> deterministic validators -> optional
@@ -24,6 +24,7 @@ from nlp.normalization import (
     find_natural_date_candidates,
     find_spoken_date_candidates,
     find_spoken_driving_license_candidates,
+    parse_spoken_alnum,
 )
 
 # ---------- deterministic validators ----------
@@ -116,7 +117,7 @@ UPI_HANDLES = {
 }
 
 PHONE_NEGATIVE_CONTEXT = re.compile(
-    r"(?i)\b(?:order|transaction|txn|reference|ref|loan|customer|application|invoice|ticket|case|employee|tracking|token|request|complaint)\s*(?:id|number|no\.?|#)?(?:\s+is)?\s*[:=-]?\s*$"
+    r"(?i)\b(?:order|transaction|txn|reference|ref|loan|customer|application|invoice|ticket|case|employee|tracking|token|request|complaint)\s*(?:id|number|no\.?|#)?(?:\s+is(?:\s+also)?)?\s*[:=-]?\s*$"
 )
 PUBLIC_PHONE_CONTEXT = re.compile(
     r"(?i)\b(?:customer\s+(?:support|care)\s+)?(?:helpline|hotline|support\s+line|customer\s+care\s+number|switchboard|office\s+number|public\s+contact)\s*(?:number)?\s*(?:is|:|=)?\s*$"
@@ -131,6 +132,10 @@ PHONE_FOLLOWING_CONTEXT = re.compile(r"(?i)\b(?:for\s+(?:future\s+)?contact|for\
 ACCOUNT_CONTEXT = re.compile(r"(?i)\b(?:account|a/c|acct|loan\s+account|bank\s+account)\s*(?:number|no\.?|#)?\b")
 OTP_CONTEXT = re.compile(r"(?i)\b(?:otp|one[- ]time\s+(?:password|passcode)|verification\s+code|security\s+code|auth(?:entication)?\s+code)\b")
 CVV_CONTEXT = re.compile(r"(?i)\b(?:cvv|cvc|card\s+security\s+code|card\s+verification\s+value)\b")
+_CVV_QUANTITY_RIGHT = re.compile(
+    r"(?i)^\s*(?:transactions?|items?|units?|rupees?|dollars?|records?|samples?|people|pages?|"
+    r"orders?|payments?|days?|months?|years?|calls?|tickets?|cases?)\b"
+)
 PIN_CONTEXT = re.compile(r"(?i)\b(?:pin\s*code|pincode|postal\s+code|zip\s+code)\b")
 DOB_CONTEXT = re.compile(r"(?i)\b(?:dob|date\s+of\s+birth|born\s+on|birth\s+date|birthday)\b")
 PASSPORT_CONTEXT = re.compile(r"(?i)\b(?:passport|passport\s+(?:number|no\.?))\b")
@@ -194,7 +199,9 @@ _ROLE_RESET = re.compile(
     r"application|invoice|tracking|phone|mobile|account|ifsc|pan|email|upi|otp|cvv|address|dob|date\s+of\s+birth)\b)|"
     r",(?=\s*(?:(?:the|my|your)\s+)?(?:transaction|txn|complaint|ticket|case|order|reference|employee|"
     r"application(?:\s+deadline)?|invoice|tracking|phone|mobile|account|ifsc|pan|email|upi|otp|cvv|address|dob|"
-    r"date\s+of\s+birth|meeting|report)\b))"
+    r"date\s+of\s+birth|meeting|report)\b)|"
+    r",(?=\s*(?:there\s+(?:were|was|are|is)|we\s+(?:processed|handled|received)|they\s+(?:processed|handled)|"
+    r"this\s+(?:was|is)|that\s+(?:was|is))\b))"
 )
 
 # Field-aware clause segmentation. Sentence-level context is too broad for utterances
@@ -369,7 +376,7 @@ def _overlaps(a: dict, b: dict) -> bool:
 
 def _resolve_conflicts(items: Iterable[dict]) -> list[dict]:
     items=[dict(x) for x in items]
-    # v4.10: a strong-ownership raw fallback may intentionally own a wider mask span
+    # v4.11: a strong-ownership raw fallback may intentionally own a wider mask span
     # than a strict normalized candidate. Preserve the strict candidate's canonical
     # interpretation on that wider span rather than throwing the normalization away.
     for raw in items:
@@ -656,6 +663,16 @@ _FIELDISH_STOP = re.compile(
     r"(?i)(?:,\s*|\s+)(?:and\s+)?(?:(?:my|your|the)\s+)?(?:phone|mobile|email|account|ifsc|pan|upi|otp|cvv|address|dob|date\s+of\s+birth|passport|driving\s+licen[cs]e|transaction|complaint|order|reference|"
     r"product\s+batch|batch(?:\s+code)?|asset\s+code|document\s+template|page\s+(?:id|identifier|number)|support\s+ticket|shipment\s+reference|invoice\s+reference)\b"
 )
+_CROSS_SENTENCE_IFSC_ASSIGN = re.compile(
+    r"(?is)\b(?:my\s+)?(?:bank\s+)?ifsc(?:\s+code)?\s+(?:is|:|=)\s*"
+    r"(?P<head>[^.!?\n]{2,42})[.!?]\s*(?P<tail>[^.!?\n]{1,42})"
+)
+_FALLBACK_TOKEN_LIMIT={
+    "PHONE":8,"CARD":10,"PINCODE":5,"IFSC":12,"PASSPORT":8,"DRIVING_LICENSE":14,
+}
+_FALLBACK_CHAR_LIMIT={
+    "PHONE":34,"CARD":40,"PINCODE":20,"IFSC":72,"PASSPORT":48,"DRIVING_LICENSE":76,
+}
 
 
 def _trim_fallback_value(raw: str) -> str:
@@ -675,6 +692,25 @@ def _trim_fallback_value(raw: str) -> str:
     return raw.strip(" \t,.:;=-")
 
 
+def _clamp_raw_fallback(text: str, start: int, tentative_end: int, kind: str) -> tuple[int,int,str]:
+    """Hard safety boundary for ownership-gated raw fallback spans.
+
+    A fallback may never own text beyond its field clause, a known next-role marker,
+    or a small type-specific token/character budget. This is intentionally independent
+    of confidence so a high-confidence detector cannot catastrophically over-mask.
+    """
+    _,clause_hi=_field_clause_bounds(text,start,start,260)
+    end=min(len(text),tentative_end,clause_hi,start+_FALLBACK_CHAR_LIMIT.get(kind,72))
+    raw=text[start:end]
+    raw=_trim_fallback_value(raw)
+    token_limit=_FALLBACK_TOKEN_LIMIT.get(kind,12)
+    tokens=list(re.finditer(r"\S+",raw))
+    if len(tokens)>token_limit:
+        raw=raw[:tokens[token_limit-1].end()]
+    raw=raw.rstrip(" \t,.:;=-")
+    return start,start+len(raw),raw
+
+
 def _raw_digits_ok(raw: str, lo: int, hi: int) -> bool:
     n=len(_digits(raw))
     return lo<=n<=hi
@@ -685,9 +721,8 @@ def _find_asr_fallback_candidates(text: str) -> list[dict]:
     # Phone: tolerate one or two ASR digit insertions/deletions only under explicit
     # personal contact ownership. Helplines/order IDs are not covered by this grammar.
     for m in _STRONG_PHONE_ASSIGN.finditer(text):
-        raw=_trim_fallback_value(m.group("value"))
+        s,e,raw=_clamp_raw_fallback(text,m.start("value"),m.end("value"),"PHONE")
         if not _raw_digits_ok(raw,8,13): continue
-        s=m.start("value"); e=s+len(raw)
         out.append(_raw_item("PHONE",s,e,text[s:e],0.94,"ownership_raw_phone_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
 
     # Card: do not reconstruct a failed Luhn value; mask the damaged numeric span when
@@ -696,37 +731,52 @@ def _find_asr_fallback_candidates(text: str) -> list[dict]:
         prefix=text[max(0,m.start()-32):m.start()]
         if re.search(r"(?i)\b(?:test|sample|example|demo)\s*$",prefix):
             continue
-        raw=_trim_fallback_value(m.group("value"))
+        s,e,raw=_clamp_raw_fallback(text,m.start("value"),m.end("value"),"CARD")
         if not _raw_digits_ok(raw,9,19): continue
-        s=m.start("value"); e=s+len(raw)
         out.append(_raw_item("CARD",s,e,text[s:e],0.945,"ownership_raw_card_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
 
     # PIN: 5-7 digits accommodates common ASR insert/delete errors while public-geography
     # prose remains protected by the contextual veto.
     for m in _STRONG_PIN_ASSIGN.finditer(text):
-        raw=_trim_fallback_value(m.group("value"))
+        s,e,raw=_clamp_raw_fallback(text,m.start("value"),m.end("value"),"PINCODE")
         if not _raw_digits_ok(raw,5,7): continue
-        s=m.start("value"); e=s+len(raw)
         out.append(_raw_item("PINCODE",s,e,text[s:e],0.935,"ownership_raw_pincode_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
 
     # IFSC/passport/DL raw spans are useful when ASR corrupts phonetic alphabet words.
     # Require both explicit assignment and enough alphanumeric/numeric evidence.
     for m in _STRONG_IFSC_ASSIGN.finditer(text):
-        raw=_trim_fallback_value(m.group("value"))
+        s,e,raw=_clamp_raw_fallback(text,m.start("value"),m.end("value"),"IFSC")
         compact=re.sub(r"[^A-Za-z0-9]","",raw)
         if len(compact)<7 or sum(c.isdigit() for c in compact)<4: continue
-        s=m.start("value"); e=s+len(raw)
         out.append(_raw_item("IFSC",s,e,text[s:e],0.925,"ownership_raw_ifsc_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
     for m in _STRONG_PASSPORT_ASSIGN.finditer(text):
-        raw=_trim_fallback_value(m.group("value"))
+        s,e,raw=_clamp_raw_fallback(text,m.start("value"),m.end("value"),"PASSPORT")
         if not _raw_digits_ok(raw,6,8): continue
-        s=m.start("value"); e=s+len(raw)
         out.append(_raw_item("PASSPORT",s,e,text[s:e],0.93,"ownership_raw_passport_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
     for m in _STRONG_DL_ASSIGN.finditer(text):
-        raw=_trim_fallback_value(m.group("value"))
+        s,e,raw=_clamp_raw_fallback(text,m.start("value"),m.end("value"),"DRIVING_LICENSE")
         if not _raw_digits_ok(raw,9,18): continue
-        s=m.start("value"); e=s+len(raw)
         out.append(_raw_item("DRIVING_LICENSE",s,e,text[s:e],0.93,"ownership_raw_dl_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
+
+    # Cross-punctuation IFSC fallback. ASR may insert a sentence boundary inside a
+    # phonetic IFSC ("Hotel Delta Foxtrot. Charlie 001234"). Under explicit personal
+    # IFSC ownership we mask the complete bounded raw span even if one character was
+    # deleted and the strict IFSC validator cannot reconstruct it.
+    for m in _CROSS_SENTENCE_IFSC_ASSIGN.finditer(text):
+        raw=(m.group("head").strip()+". "+m.group("tail").strip())
+        raw=_trim_fallback_value(raw)
+        parsed=parse_spoken_alnum(raw)
+        if len(parsed)<8 or sum(ch.isalpha() for ch in parsed)<3 or sum(ch.isdigit() for ch in parsed)<4:
+            continue
+        start=m.start("head"); end=min(m.end("tail"),start+_FALLBACK_CHAR_LIMIT["IFSC"])
+        source=_trim_fallback_value(text[start:end])
+        toks=list(re.finditer(r"\S+",source))
+        if len(toks)>_FALLBACK_TOKEN_LIMIT["IFSC"]:
+            source=source[:toks[_FALLBACK_TOKEN_LIMIT["IFSC"]-1].end()]
+        source=source.rstrip(" \t,;=-")
+        e2=start+len(source)
+        if e2<=start: continue
+        out.append(_raw_item("IFSC",start,e2,text[start:e2],0.935,"ownership_cross_sentence_ifsc_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=3))
 
     # ASR `local at provider` forms. Exact reconstruction is safe because we replace
     # only the spoken word `at`; no missing letters/digits are guessed.
@@ -821,7 +871,13 @@ def _expected_response_candidate(kind: str, sentence: str, sent_start: int) -> d
     if kind=="UPI": return from_regex(_UPI,0.975,"expected_type_response_upi")
     if kind=="ACCOUNT_NUMBER": return from_regex(_LONG_NUMBER,0.97,"expected_type_response_account")
     if kind=="OTP": return from_regex(_OTP,0.97,"expected_type_response_otp")
-    if kind=="CVV": return from_regex(_CVV,0.97,"expected_type_response_cvv")
+    if kind=="CVV":
+        m=_CVV.search(tail)
+        if not m or _CVV_QUANTITY_RIGHT.search(tail[m.end():]): return None
+        return _raw_item(
+            "CVV",base+m.start(),base+m.end(),m.group(0),0.97,"expected_type_response_cvv",
+            expected_type_state=True,ownership_strength=4,
+        )
     if kind=="PINCODE": return from_regex(_PINCODE,0.96,"expected_type_response_pincode")
     if kind=="DOB":
         x=from_regex(_DOB,0.97,"expected_type_response_dob")
@@ -860,13 +916,50 @@ def _expected_response_candidate(kind: str, sentence: str, sent_start: int) -> d
     return None
 
 
+def _sentence_contains_expected_value(kind: str, sentence: str) -> bool:
+    """Lightweight one-shot state guard.
+
+    An expectation is opened only when the field has not already been satisfied in the
+    sentence that introduced it. This prevents a successfully supplied CVV/OTP/etc.
+    from leaking ownership into later quantities or identifiers.
+    """
+    if kind=="AADHAAR": return any(len(_digits(m.group(0)))==12 for m in _AADHAAR.finditer(sentence))
+    if kind=="PHONE": return any(len(_digits(m.group(0))[-10:])==10 for m in _PHONE.finditer(sentence))
+    if kind=="PAN": return bool(_PAN.search(sentence))
+    if kind=="EMAIL": return bool(_EMAIL.search(sentence)) or bool(find_spoken_email_candidates(sentence)) or any("." in c.get("provider","") for c in find_mixed_at_candidates(sentence))
+    if kind=="UPI": return bool(_UPI.search(sentence)) or bool(find_spoken_handle_candidates(sentence)) or any(c.get("provider") in UPI_HANDLES for c in find_mixed_at_candidates(sentence))
+    if kind=="ACCOUNT_NUMBER": return bool(_LONG_NUMBER.search(sentence))
+    if kind=="OTP": return bool(_OTP.search(sentence))
+    if kind=="CVV":
+        return any(not _CVV_QUANTITY_RIGHT.search(sentence[m.end():]) for m in _CVV.finditer(sentence))
+    if kind=="PINCODE": return bool(_PINCODE.search(sentence))
+    if kind=="DOB": return bool(_DOB.search(sentence)) or bool(find_natural_date_candidates(sentence)) or bool(find_spoken_date_candidates(sentence))
+    if kind=="PASSPORT":
+        if _PASSPORT.search(sentence): return True
+        return any(re.fullmatch(r"[A-Z][1-9][0-9]{6}",c.get("canonical","").upper()) for c in find_spoken_alnum_runs(sentence))
+    if kind=="DRIVING_LICENSE": return bool(_DRIVING_LICENSE.search(sentence)) or bool(find_spoken_driving_license_candidates(sentence))
+    if kind=="VOTER_ID": return bool(_VOTER_ID.search(sentence))
+    if kind=="CARD": return any(luhn_valid(m.group(0)) for m in _CARD.finditer(sentence))
+    if kind=="IFSC":
+        if find_ifsc_candidates(sentence): return True
+        return any(re.fullmatch(r"[A-Z]{4}0[A-Z0-9]{6}",c.get("canonical","").upper()) for c in find_spoken_alnum_runs(sentence))
+    if kind=="ADDRESS": return bool(re.search(r"(?i)\b(?:flat|house|apartment|road|street|lane|sector|colony|nagar)\b",sentence) and re.search(r"\d",sentence))
+    if kind=="NAME": return bool(_NAME_LABEL.search(sentence) or _SELF_NAME_LABEL.search(sentence)) and bool(re.search(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}",sentence))
+    return False
+
+
 def _find_expected_state_candidates(text: str) -> list[dict]:
     spans=_sentence_spans(text)
     out=[]
     for i in range(1,len(spans)):
         p0,p1=spans[i-1]; s0,s1=spans[i]
-        expected=_infer_expected_type(text[p0:p1])
+        previous=text[p0:p1]
+        expected=_infer_expected_type(previous)
         if not expected: continue
+        # One-shot state: if the introducing sentence already contains a credible value
+        # for this type, the expectation is satisfied and must not leak forward.
+        if _sentence_contains_expected_value(expected,previous):
+            continue
         # TTL is exactly one sentence. If this sentence does not consume the state, it
         # is not carried any further.
         item=_expected_response_candidate(expected,text[s0:s1],s0)
@@ -1115,7 +1208,12 @@ def detect_pii(
         elif re.search(r"(?i)\b(?:verify|authenticate|login|sign\s*in)\b",ctx):
             x=_item("OTP",m,0.74,"weak_auth_context"); x.update(ai_review=True,ner_review=True); found.append(x)
     for m in _CVV.finditer(text):
-        if CVV_CONTEXT.search(_role_left_context(text,m.start(),64)): found.append(_item("CVV",m,0.97,"cvv_context"))
+        left=_role_left_context(text,m.start(),64)
+        right=_right_clause(text,m.end(),48)
+        if _CVV_QUANTITY_RIGHT.search(right):
+            continue
+        if CVV_CONTEXT.search(left):
+            found.append(_item("CVV",m,0.97,"cvv_context"))
 
     for m in _PINCODE.finditer(text):
         ctx=_role_left_context(text,m.start(),90)
@@ -1144,7 +1242,7 @@ def detect_pii(
     found.extend(_spoken_candidates(text))
     found.extend(_find_expected_state_candidates(text))
 
-    # v4.10 architecture: field-clause segmentation -> candidate -> validator ->
+    # v4.11 architecture: field-clause segmentation -> candidate -> validator ->
     # occurrence/discourse ownership -> context veto -> optional AI -> ownership-weighted
     # conflict resolver. Hard negative context runs before AI for speed and precision.
     found=_apply_occurrence_context_policy(text,found)
