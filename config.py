@@ -29,6 +29,9 @@ class Settings:
     repetition_penalty: float = float(os.getenv("FINAI_REPETITION_PENALTY", "1.05"))
     no_repeat_ngram_size: int = int(os.getenv("FINAI_NO_REPEAT_NGRAM", "3"))
     hallucination_silence_threshold: float = float(os.getenv("FINAI_HALLUCINATION_SILENCE", "1.4"))
+    privacy_redecode: bool = _env_bool("FINAI_PRIVACY_REDECODE", True)
+    privacy_redecode_max_windows: int = int(os.getenv("FINAI_PRIVACY_REDECODE_MAX_WINDOWS", "4"))
+    privacy_conservative_audio_guard: bool = _env_bool("FINAI_PRIVACY_CONSERVATIVE_AUDIO_GUARD", True)
     financial_vocab: list[str] = field(default_factory=lambda: [
         "EMI", "APR", "KYC", "e-KYC", "NPA", "NBFC", "RBI", "SEBI", "CIBIL",
         "foreclosure", "prepayment", "outstanding balance", "overdue", "principal",

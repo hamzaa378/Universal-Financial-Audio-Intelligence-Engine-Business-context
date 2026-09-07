@@ -1,4 +1,4 @@
-"""Privacy-first PII detection for financial-call transcripts (v4.9).
+"""Privacy-first PII detection for financial-call transcripts (v4.10).
 
 Pipeline:
 ASR text -> ASR-aware normalization candidates -> deterministic validators -> optional
@@ -164,7 +164,7 @@ _PUBLIC_GEO_CONTEXT = re.compile(
 _EXAMPLE_CONTEXT = re.compile(
     r"(?i)\b(?:example|sample|documentation|docs?|tutorial|manual|article|test\s+(?:value|number|data|case)|"
     r"standard\s+test|literal\s+text|placeholder|template|configuration\s+file|source\s+code|"
-    r"unit[- ]?test|synthetic\s+benchmark|dataset\s+(?:column|example)|training\s+video|"
+    r"unit[- ]?test|synthetic\s+benchmark|dataset\s+(?:column|example)|training\s+(?:video|document|material|guide)|"
     r"demonstrat(?:e|es|ed|ion))\b"
 )
 
@@ -175,8 +175,12 @@ _EXPLANATION_CONTEXT = re.compile(
     r"(?i)\b(?:may\s+(?:also\s+)?contain|can\s+(?:also\s+)?contain|usually\s+contains?|"
     r"typically\s+contains?|generally\s+contains?|consists?\s+of|is\s+an?\s+(?:temporary|alphanumeric|numeric|structured|personal|bank)|"
     r"identifies?\s+(?:a|an|the)|is\s+(?:printed|located|shown)\s+on|has\s+(?:a\s+)?structured\s+format|"
-    r"format\s+(?:contains?|includes?)|is\s+used\s+to\s+(?:identify|verify|authenticate)|"
-    r"example\s+of|used\s+as\s+(?:an?\s+)?example|should\s+contain|must\s+contain)\b"
+    r"format\s+(?:contains?|includes?|is)|is\s+used\s+to\s+(?:identify|verify|authenticate)|"
+    r"example\s+of|used\s+as\s+(?:an?\s+)?example|should\s+contain|must\s+contain|"
+    r"(?:can|may|could)\s+be\s+(?:spoken|said|read|written|formatted|represented|entered)\s+as|"
+    r"(?:is|are)\s+(?:spoken|said|read|written|formatted|represented|entered)\s+as|"
+    r"(?:spoken|written|formatted|represented)\s+(?:form|format|syntax)\s+(?:is|looks\s+like)|"
+    r"(?:syntax|format)\s+(?:is|looks\s+like)|looks?\s+like|pronounced\s+as)\b"
 )
 
 _REFERENCE_ROLE_CONTEXT = re.compile(
@@ -364,6 +368,19 @@ def _overlaps(a: dict, b: dict) -> bool:
 
 
 def _resolve_conflicts(items: Iterable[dict]) -> list[dict]:
+    items=[dict(x) for x in items]
+    # v4.10: a strong-ownership raw fallback may intentionally own a wider mask span
+    # than a strict normalized candidate. Preserve the strict candidate's canonical
+    # interpretation on that wider span rather than throwing the normalization away.
+    for raw in items:
+        if not raw.get("raw_fallback"):
+            continue
+        compatible=[x for x in items if x is not raw and x.get("type")==raw.get("type") and _overlaps(raw,x) and x.get("canonical")]
+        if compatible:
+            best=max(compatible,key=lambda x:(float(x.get("confidence",0)),x.get("end",0)-x.get("start",0)))
+            raw.setdefault("canonical",best.get("canonical"))
+            raw["evidence"]=raw.get("evidence","")+"+strict_normalized_support"
+            raw["confidence"]=round(max(float(raw.get("confidence",0)),float(best.get("confidence",0))),3)
     priority = {
         "API_KEY":103,"AUTH_TOKEN":103,"PASSWORD":103,"EMAIL":100,"PAN":99,"IFSC":98,"UPI":97,"AADHAAR":96,"CARD":95,
         "PASSPORT":94,"ADDRESS":93,"VOTER_ID":92,"DRIVING_LICENSE":92,
@@ -376,6 +393,7 @@ def _resolve_conflicts(items: Iterable[dict]) -> list[dict]:
         items,
         key=lambda x:(
             -int(x.get("ownership_strength",0)),
+            -int(x.get("mask_span_authority",0)),
             -x["confidence"],
             -priority.get(x["type"],0),
             -(x["end"]-x["start"]),
@@ -635,7 +653,8 @@ _STRONG_DL_ASSIGN = re.compile(
     r"(?i)\b(?:my\s+)?(?:driving\s+licen[cs]e|driver'?s\s+licen[cs]e|dl)(?:\s+(?:number|no\.?))?\s+(?:is|:|=)\s*(?P<value>[A-Za-z0-9][A-Za-z0-9\s,.-]{8,42})"
 )
 _FIELDISH_STOP = re.compile(
-    r"(?i)(?:,\s*|\s+)(?:and\s+)?(?:(?:my|your|the)\s+)?(?:phone|mobile|email|account|ifsc|pan|upi|otp|cvv|address|dob|date\s+of\s+birth|passport|driving\s+licen[cs]e|transaction|complaint|order|reference)\b"
+    r"(?i)(?:,\s*|\s+)(?:and\s+)?(?:(?:my|your|the)\s+)?(?:phone|mobile|email|account|ifsc|pan|upi|otp|cvv|address|dob|date\s+of\s+birth|passport|driving\s+licen[cs]e|transaction|complaint|order|reference|"
+    r"product\s+batch|batch(?:\s+code)?|asset\s+code|document\s+template|page\s+(?:id|identifier|number)|support\s+ticket|shipment\s+reference|invoice\s+reference)\b"
 )
 
 
@@ -643,6 +662,16 @@ def _trim_fallback_value(raw: str) -> str:
     raw=raw.strip(" \t,.:;=-")
     m=_FIELDISH_STOP.search(raw)
     if m: raw=raw[:m.start()]
+    # ASR often glues ordinary prose after a comma to an owned identifier.  If the
+    # prefix already contains a substantial numeric payload and the following phrase
+    # contains no further digits, the comma is a safe value boundary.  Commas inside
+    # phonetic/digit dictation are retained because another numeric token follows.
+    for cm in re.finditer(r",\s*",raw):
+        prefix=raw[:cm.start()]
+        tail=raw[cm.end():cm.end()+28]
+        if len(_digits(prefix))>=4 and not re.search(r"\d",tail):
+            raw=prefix
+            break
     return raw.strip(" \t,.:;=-")
 
 
@@ -659,7 +688,7 @@ def _find_asr_fallback_candidates(text: str) -> list[dict]:
         raw=_trim_fallback_value(m.group("value"))
         if not _raw_digits_ok(raw,8,13): continue
         s=m.start("value"); e=s+len(raw)
-        out.append(_raw_item("PHONE",s,e,text[s:e],0.94,"ownership_raw_phone_fallback",raw_fallback=True,ownership_strength=4))
+        out.append(_raw_item("PHONE",s,e,text[s:e],0.94,"ownership_raw_phone_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
 
     # Card: do not reconstruct a failed Luhn value; mask the damaged numeric span when
     # the utterance explicitly says it is the speaker's card number.
@@ -670,7 +699,7 @@ def _find_asr_fallback_candidates(text: str) -> list[dict]:
         raw=_trim_fallback_value(m.group("value"))
         if not _raw_digits_ok(raw,9,19): continue
         s=m.start("value"); e=s+len(raw)
-        out.append(_raw_item("CARD",s,e,text[s:e],0.945,"ownership_raw_card_fallback",raw_fallback=True,ownership_strength=4))
+        out.append(_raw_item("CARD",s,e,text[s:e],0.945,"ownership_raw_card_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
 
     # PIN: 5-7 digits accommodates common ASR insert/delete errors while public-geography
     # prose remains protected by the contextual veto.
@@ -678,7 +707,7 @@ def _find_asr_fallback_candidates(text: str) -> list[dict]:
         raw=_trim_fallback_value(m.group("value"))
         if not _raw_digits_ok(raw,5,7): continue
         s=m.start("value"); e=s+len(raw)
-        out.append(_raw_item("PINCODE",s,e,text[s:e],0.935,"ownership_raw_pincode_fallback",raw_fallback=True,ownership_strength=4))
+        out.append(_raw_item("PINCODE",s,e,text[s:e],0.935,"ownership_raw_pincode_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
 
     # IFSC/passport/DL raw spans are useful when ASR corrupts phonetic alphabet words.
     # Require both explicit assignment and enough alphanumeric/numeric evidence.
@@ -687,17 +716,17 @@ def _find_asr_fallback_candidates(text: str) -> list[dict]:
         compact=re.sub(r"[^A-Za-z0-9]","",raw)
         if len(compact)<7 or sum(c.isdigit() for c in compact)<4: continue
         s=m.start("value"); e=s+len(raw)
-        out.append(_raw_item("IFSC",s,e,text[s:e],0.925,"ownership_raw_ifsc_fallback",raw_fallback=True,ownership_strength=4))
+        out.append(_raw_item("IFSC",s,e,text[s:e],0.925,"ownership_raw_ifsc_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
     for m in _STRONG_PASSPORT_ASSIGN.finditer(text):
         raw=_trim_fallback_value(m.group("value"))
         if not _raw_digits_ok(raw,6,8): continue
         s=m.start("value"); e=s+len(raw)
-        out.append(_raw_item("PASSPORT",s,e,text[s:e],0.93,"ownership_raw_passport_fallback",raw_fallback=True,ownership_strength=4))
+        out.append(_raw_item("PASSPORT",s,e,text[s:e],0.93,"ownership_raw_passport_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
     for m in _STRONG_DL_ASSIGN.finditer(text):
         raw=_trim_fallback_value(m.group("value"))
         if not _raw_digits_ok(raw,9,18): continue
         s=m.start("value"); e=s+len(raw)
-        out.append(_raw_item("DRIVING_LICENSE",s,e,text[s:e],0.93,"ownership_raw_dl_fallback",raw_fallback=True,ownership_strength=4))
+        out.append(_raw_item("DRIVING_LICENSE",s,e,text[s:e],0.93,"ownership_raw_dl_fallback",raw_fallback=True,ownership_strength=4,mask_span_authority=2))
 
     # ASR `local at provider` forms. Exact reconstruction is safe because we replace
     # only the spoken word `at`; no missing letters/digits are guessed.
@@ -751,6 +780,16 @@ def _infer_expected_type(sentence: str) -> str | None:
     # not CARD, because CVV is the grammatical topic.
     return hits[0][1]
 
+
+
+def infer_expected_type(sentence: str) -> str | None:
+    """Public, side-effect-free wrapper used by targeted ASR privacy recovery."""
+    return _infer_expected_type(sentence)
+
+
+def response_ownership_present(sentence: str) -> bool:
+    """Whether a sentence begins like a direct answer to the immediately prior field."""
+    return bool(_RESPONSE_OWNERSHIP.search(sentence or ""))
 
 def _offset_item(item: dict, offset: int, **extra) -> dict:
     x=dict(item)
@@ -1105,7 +1144,7 @@ def detect_pii(
     found.extend(_spoken_candidates(text))
     found.extend(_find_expected_state_candidates(text))
 
-    # v4.9 architecture: field-clause segmentation -> candidate -> validator ->
+    # v4.10 architecture: field-clause segmentation -> candidate -> validator ->
     # occurrence/discourse ownership -> context veto -> optional AI -> ownership-weighted
     # conflict resolver. Hard negative context runs before AI for speed and precision.
     found=_apply_occurrence_context_policy(text,found)

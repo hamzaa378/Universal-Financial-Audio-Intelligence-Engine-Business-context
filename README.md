@@ -1,6 +1,6 @@
-# Universal Financial Audio Intelligence Engine — v4.9 ASR-Robust Privacy Hybrid
+# Universal Financial Audio Intelligence Engine — v4.10 STT-Guard Privacy Hybrid
 
-v4.9 keeps the v4.7/v4.8 occurrence-aware architecture and adds an ASR-robust privacy layer: ownership-gated raw-span fallback for damaged values, mixed spoken/written email and UPI normalization, mixed NATO/digit alphanumeric decoding, conservative fuzzy driving-licence state handling, stronger explanation/public-role vetoes, and broader natural ownership phrases. Strict validation remains the default path; the fallback hides only strongly owned source spans and never invents missing private characters.
+v4.10 keeps the v4.9 ASR-robust detector and adds STT-specific safety guards for the remaining real-speech failures: full owned-span masking for raw fallbacks, stronger spoken-as/format/example vetoes, and expectation-aware targeted ASR re-decoding for sensitive replies that disappear from the primary transcript. If the alternate decode still cannot recover the value, v4.10 can conservatively protect a short audio window without inventing transcript characters.
 
 ## Processing architecture
 
@@ -26,13 +26,29 @@ Audio / microphone
   -> example/document/reference veto
   -> optional token NER support for ambiguous clauses
   -> optional semantic privacy judge using local grammatical role
-  -> ownership-weighted conflict resolver
+  -> ownership-weighted conflict resolver + full owned-span authority
   -> token-owned PII/profanity entities
-  -> protected transcript + token-time audio redaction
+  -> unresolved expected-field check
+       - targeted second ASR decode on a small audio window
+       - alternate-hypothesis confirmation
+       - bounded conservative audio guard if still unresolved
+  -> protected transcript + token-time/audio-recovery redaction
   -> financial entities / intent / obligations / regulatory screening
   -> Streamlit review UI
 ```
 
+
+## v4.10 STT-guard improvements
+
+- **Full owned-span masking:** ownership-gated raw fallbacks now control the complete sensitive value span, while stopping before new roles such as product batches, reference IDs and ordinary trailing prose.
+- **Strict normalized support is preserved:** when a wider raw span overlaps a strict normalized candidate, v4.10 keeps the normalized canonical interpretation while using the safer wider mask boundary.
+- **Stronger teaching/example vetoes:** phrases such as `can be spoken as`, `may be written as`, `formatted as`, `represented as`, `syntax is`, and training-document examples are treated as explanations unless personal ownership is explicit.
+- **Expectation-aware privacy re-decode:** if a sentence establishes a sensitive field and the immediately following owned response contains no accepted PII, only that small audio window is decoded again with a field-specific privacy prompt and stronger beam search.
+- **No invented PII:** alternate ASR text is internal. If recovery confirms the expected type, only the recovered word timings are used for audio redaction.
+- **Conservative audio guard:** if the second decode also fails, a short type-bounded response interval can still be muted/beeped. This protects audio when the primary ASR deletes the value entirely.
+- The extra ASR pass is conditional; ordinary calls with no unresolved expected field do not pay the second-decode cost.
+
+See `V4_10_CHANGES.md` and `LIMITATIONS_V4_10.md`.
 
 ## v4.9 ASR-robust improvements
 
@@ -180,7 +196,7 @@ Diarization             OFF unless needed
 run_privacy_benchmark.bat
 ```
 
-The bundled synthetic regression suites are for development regression only. They are not production-accuracy claims. v4.9 retains all prior suites and adds `benchmarks\asr_robust_v49.jsonl` for ASR-corrupted owned values, mixed spoken/written email/UPI, public-line suppression, explanation vetoes, and broader ownership language.
+The bundled synthetic regression suites are for development regression only. They are not production-accuracy claims. v4.10 retains all prior suites, keeps `benchmarks\asr_robust_v49.jsonl`, and adds `benchmarks\stt_guard_v410.jsonl` for spoken-as explanation vetoes and full raw-fallback mask boundaries. Audio recovery behavior is covered by `tests\test_v410_stt_guard.py` because it depends on ASR timing/state rather than text-only cases.
 
 ## Real audio manifest benchmark
 

@@ -1,0 +1,10 @@
+{"id":"spoken-as-email-negative","text":"The training document says that an email can be spoken as name dot surname at domain dot com.","expected":[]}
+{"id":"written-as-email-negative","text":"The tutorial says an email may be written as sara dot khan at example dot com.","expected":[]}
+{"id":"formatted-as-upi-negative","text":"The manual says a UPI ID can be formatted as user dot name at oksbi.","expected":[]}
+{"id":"personal-spoken-email-positive","text":"My email is sara dot khan at example dot com.","expected":[{"type":"EMAIL","value":"sara dot khan at example dot com"}]}
+{"id":"dl-owned-span-boundary","text":"My driving license number is Carnitaka0120210012345, product batch KAO120210012345, past inspection.","expected":[{"type":"DRIVING_LICENSE","value":"Carnitaka0120210012345"}]}
+{"id":"dl-trailing-prose-boundary","text":"My driving license number is Carnitaka0120210012345, past inspection.","expected":[{"type":"DRIVING_LICENSE","value":"Carnitaka0120210012345"}]}
+{"id":"ifsc-comma-inside-corrupt-dictation","text":"My bank IFSC is Hotel Delta Foxtrott ID, Charlie 00001234.","expected":[{"type":"IFSC","value":"Hotel Delta Foxtrott ID, Charlie 00001234"}]}
+{"id":"test-card-negative","text":"The training document says a card number can be entered as 4111 1111 1111 1111.","expected":[]}
+{"id":"public-phone-negative","text":"The customer support helpline is 911-2456789.","expected":[]}
+{"id":"public-pin-negative","text":"The postal code 411001 covers part of Pune.","expected":[]}

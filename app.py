@@ -4,7 +4,7 @@ from pipeline import run_pipeline
 
 
 def main():
-    p=argparse.ArgumentParser(description="Universal Financial Audio Intelligence Engine v4.9")
+    p=argparse.ArgumentParser(description="Universal Financial Audio Intelligence Engine v4.10")
     p.add_argument("audio",help="Audio/video file")
     p.add_argument("--model",default=None,help="Whisper model, e.g. small, medium, large-v3")
     p.add_argument("--speed",choices=["fast","balanced","accuracy"],default="fast")

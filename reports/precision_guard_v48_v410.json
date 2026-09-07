@@ -1,0 +1,81 @@
+{
+  "dataset": {
+    "pii_cases": 10,
+    "profanity_cases": 29,
+    "note": "Synthetic regression benchmark; validate with consented/labeled real call data before production claims."
+  },
+  "pii": {
+    "tp": 8,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "false_discovery_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "negative_cases": 4,
+    "negative_cases_with_fp": 0,
+    "negative_case_false_positive_rate": 0.0,
+    "mask_failure_cases": 0
+  },
+  "pii_threshold_sweep": {
+    "0.80": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.90": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.93": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.95": {
+      "precision": 1.0,
+      "recall": 0.75,
+      "f1": 0.8571428571428571,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.97": {
+      "precision": 1.0,
+      "recall": 0.75,
+      "f1": 0.8571428571428571,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    }
+  },
+  "profanity": {
+    "tp": 17,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "false_discovery_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "negative_cases": 12,
+    "negative_cases_with_fp": 0,
+    "negative_case_false_positive_rate": 0.0,
+    "mask_failure_cases": 0
+  },
+  "text_privacy_efficiency": {
+    "evaluations": 78,
+    "total_seconds": 0.012003274000107922,
+    "cases_per_second": 6498.2270669901145,
+    "mean_ms": 0.15355006411692346,
+    "p50_ms": 0.10763199998109485,
+    "p95_ms": 0.3067430002374749,
+    "p99_ms": 0.9938610000972403
+  }
+}

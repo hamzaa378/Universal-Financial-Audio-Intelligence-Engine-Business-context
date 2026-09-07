@@ -6,6 +6,7 @@ import time
 from ingest.audio_loader import load_audio
 from ingest.tamper_detection import detect_tamper
 from asr.fintech_asr import transcribe
+from asr.privacy_recovery import recover_privacy_audio_intervals
 from nlp.language import annotate_segment_languages
 from nlp.pii import public_pii_metadata, semantic_status, ner_status, mask_pii
 from nlp.profanity import public_profanity_metadata
@@ -20,6 +21,7 @@ from analysis_ai.diarization import diarize, assign_speakers
 from decision_ai.utterance_ai import analyze_utterance
 from audio_privacy import create_protected_audio
 from nlp.token_alignment import attach_entity_tokens
+from config import SETTINGS
 
 
 def _trust(asr_conf, quality, intent_conf, pii_conf=1.0):
@@ -201,6 +203,7 @@ def run_pipeline(
     audio_redaction_method="beep",
     asr_speed_mode="balanced",
     enable_diarization=False,
+    asr_privacy_recovery: bool | None = None,
 ):
     timing={}; total0=time.perf_counter()
 
@@ -247,12 +250,37 @@ def run_pipeline(
     timing["privacy_and_nlp"]=(time.perf_counter()-t)*1000
 
     protected_audio=None
+    privacy_recovery={"enabled":False,"plans":0,"audit":[],"audio_interval_count":0}
     if create_audio_output:
         t=time.perf_counter()
+        recovery_enabled=SETTINGS.privacy_redecode if asr_privacy_recovery is None else bool(asr_privacy_recovery)
+        recovery_intervals=[]
+        if recovery_enabled:
+            rt=time.perf_counter()
+            try:
+                rr=recover_privacy_audio_intervals(
+                    audio,sr,asr,internal_privacy.get("pii",[]),model_name=model_name,
+                    max_windows=max(0,int(SETTINGS.privacy_redecode_max_windows)),
+                    conservative_on_failure=bool(SETTINGS.privacy_conservative_audio_guard),
+                )
+                recovery_intervals=list(rr.get("intervals",[]))
+                privacy_recovery={
+                    "enabled":True,"plans":int(rr.get("plans",0)),
+                    "audit":list(rr.get("audit",[])),
+                    "audio_interval_count":len(recovery_intervals),
+                }
+            except Exception as exc:
+                # Privacy recovery is an additional guard. A failure must never discard
+                # the normal detector/audio-redaction result.
+                privacy_recovery={
+                    "enabled":True,"plans":0,"audit":[],"audio_interval_count":0,
+                    "error":f"{type(exc).__name__}: {exc}",
+                }
+            timing["privacy_redecode"]=(time.perf_counter()-rt)*1000
         all_sensitive=list(internal_privacy.get("pii",[]))+list(internal_privacy.get("financial_ids",[]))
         protected_audio=create_protected_audio(
             audio_path,asr,all_sensitive,internal_privacy.get("profanity",[]),
-            method=audio_redaction_method,preloaded_audio=(audio,sr),
+            method=audio_redaction_method,preloaded_audio=(audio,sr),extra_intervals=recovery_intervals,
         )
         timing["audio_redaction"]=(time.perf_counter()-t)*1000
 
@@ -286,6 +314,7 @@ def run_pipeline(
             "semantic_ai":text_analysis["semantic_ai"],
             "ner_ai":text_analysis.get("ner_ai",{}),
             "raw_transcript_included":bool(include_raw),
+            "asr_privacy_recovery":privacy_recovery,
         },
         "confidence":{
             "overall_trust":_trust(asr["confidence"],acoustic["quality"]["score"],text_analysis["intent"]["confidence"],text_analysis["pii_mean_confidence"]),

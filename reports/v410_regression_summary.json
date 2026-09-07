@@ -1,0 +1,66 @@
+{
+  "note": "Synthetic regression summary. Not a production-world accuracy claim.",
+  "unit_tests": "73/73 passed",
+  "suites": {
+    "original": {
+      "tp": 61,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "negative_cases_with_fp": 0,
+      "mask_failure_cases": 0
+    },
+    "v4.6 context precision": {
+      "tp": 16,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "negative_cases_with_fp": 0,
+      "mask_failure_cases": 0
+    },
+    "v4.7 context recall": {
+      "tp": 18,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "negative_cases_with_fp": 0,
+      "mask_failure_cases": 0
+    },
+    "v4.8 precision guard": {
+      "tp": 8,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "negative_cases_with_fp": 0,
+      "mask_failure_cases": 0
+    },
+    "v4.9 ASR robustness": {
+      "tp": 14,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "negative_cases_with_fp": 0,
+      "mask_failure_cases": 0
+    },
+    "v4.10 STT guard": {
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "negative_cases_with_fp": 0,
+      "mask_failure_cases": 0
+    }
+  }
+}

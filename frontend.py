@@ -248,6 +248,15 @@ def _show_last_audio_result():
             else:
                 st.info("No sensitive audio intervals were detected; the protected copy contains no bleep/mute sections.")
 
+    recovery=r.get("privacy",{}).get("asr_privacy_recovery") or {}
+    if recovery.get("enabled") and recovery.get("plans",0):
+        st.info(
+            f"STT privacy recovery checked {recovery.get('plans',0)} unresolved expected response window(s); "
+            f"{recovery.get('audio_interval_count',0)} audio guard interval(s) were added."
+        )
+        with st.expander("STT privacy recovery audit"):
+            st.dataframe(recovery.get("audit",[]),width="stretch",hide_index=True)
+
     show_analysis(_analysis_view(r))
 
     st.subheader("Call confidence and performance")

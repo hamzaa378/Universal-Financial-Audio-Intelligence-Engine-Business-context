@@ -190,6 +190,7 @@ def create_protected_audio(
     pad_s: float = 0.09,
     output_path: str | None = None,
     preloaded_audio: tuple[np.ndarray, int] | None = None,
+    extra_intervals: list[dict] | None = None,
 ) -> dict:
     """Create a WAV with sensitive intervals replaced by a tone or silence."""
     if preloaded_audio is None:
@@ -199,6 +200,22 @@ def create_protected_audio(
         audio, sr=preloaded_audio
         audio=np.nan_to_num(np.asarray(audio,dtype=np.float32))
     intervals=spans_to_audio_intervals(asr, pii, profanity, pad_s=pad_s)
+    # v4.10 may add audio-only intervals recovered from a targeted second ASR decode.
+    # They intentionally have no primary-transcript character span because the first
+    # ASR pass may have deleted the sensitive value entirely.
+    if extra_intervals:
+        recovered=[]
+        for x in extra_intervals:
+            if x.get("start") is None or x.get("end") is None:
+                continue
+            recovered.append({
+                "start":max(0.0,float(x["start"])),"end":max(float(x["start"]),float(x["end"])),
+                "types":[str(x.get("type","PII"))],
+                "confidence":round(float(x.get("confidence",0.0)),4),
+                "alignment_method":x.get("alignment_method","privacy_recovery"),
+                "alignment_confidence":round(float(x.get("alignment_confidence",0.0) or 0.0),4),
+            })
+        intervals=_merge_intervals(list(intervals)+recovered)
     safe=audio.copy()
     method=(method or "beep").lower()
     if method not in {"beep","mute"}:
