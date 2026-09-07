@@ -1,0 +1,8 @@
+{"id":"v50_first_name","text":"My first name is Sara.","expected":[{"type":"NAME","value":"Sara"}]}
+{"id":"v50_surname","text":"My surname is Khan.","expected":[{"type":"NAME","value":"Khan"}]}
+{"id":"v50_phone_list_not_correction","text":"My phone number is 9876543210 and 9123456789.","expected":[{"type":"PHONE","value":"9876543210"},{"type":"PHONE","value":"9123456789"}]}
+{"id":"v50_primary_alternate_not_correction","text":"My primary phone number is 9876543210 and my alternate phone number is 9123456789.","expected":[{"type":"PHONE","value":"9876543210"},{"type":"PHONE","value":"9123456789"}]}
+{"id":"v50_text_comma_conservative","text":"My account number is 001234567890, 001234567891.","expected":[{"type":"ACCOUNT_NUMBER","value":"001234567890"},{"type":"ACCOUNT_NUMBER","value":"001234567891"}]}
+{"id":"v50_explicit_repair_filler","text":"My phone number is 9876543210, uh, 9123456789.","expected":[{"type":"PHONE","value":"9123456789"}]}
+{"id":"v50_public_numbers_not_owned","text":"The report contains 9876543210 and 9123456789 as synthetic identifiers.","expected":[]}
+{"id":"v50_support_numbers_not_correction","text":"The customer support helpline is 9876543210 and the backup helpline is 9123456789.","expected":[]}

@@ -1,4 +1,21 @@
-# Universal Financial Audio Intelligence Engine — v4.12 Optimized STT-Guard Privacy Hybrid
+# Universal Financial Audio Intelligence Engine — v5.0 Correction-Aware Privacy
+
+v5.0 builds on the full v4.12 optimized STT-Guard pipeline and adds conservative correction-aware masking for natural speech. A speaker can restart a phone/account/OTP/name/etc. value without saying a correction keyword; when timing and same-field ownership strongly establish a self-repair, the later committed value is masked and the superseded mistaken value is left unchanged. Ambiguous cases remain privacy-conservative and keep both values masked.
+
+## v5.0 correction-aware improvements
+
+- **Keyword-free self-repair detection:** uses existing PII decisions plus Whisper pause/timestamp evidence.
+- **Correct-value authority:** a later committed same-type value can supersede the earlier mistaken value.
+- **No broad threshold reduction:** the resolver can only operate inside a strongly owned field episode.
+- **List/alternate-field protection:** `and/or`, primary/alternate/secondary/backup roles are not treated as corrections.
+- **ASR punctuation recovery:** a corrected value after an ASR-inserted period/ellipsis can be revalidated with the normal type validator, then promoted only if timing confirms a restart.
+- **Name-component coverage:** first/middle/last/given/family/maiden name and surname are explicitly owned NAME fields.
+- **Safe correction audit:** the UI and result JSON report spans/type/pause/method without exposing raw values.
+- **Regression lock:** 98/98 unit tests pass; all previous v4.4-v4.12 synthetic privacy suites retain 0 FP / 0 FN; the new v5.0 text precision suite is 9 TP / 0 FP / 0 FN.
+
+See `V5_0_CHANGES.md` and `LIMITATIONS_V5_0.md`.
+
+## v4.12 baseline retained
 
 v4.12 retains the v4.11 reliability architecture, adds explicit `[TYPE AUDIO PROTECTED]` markers for conservatively guarded speech, makes documentation/example transitions hard raw-span boundaries, adds per-entity recovery telemetry, and removes major pre-ASR runtime overhead with a fast SoundFile/SOXR loader plus vectorized NumPy acoustic analysis. Privacy thresholds, ASR profiles, mask padding, ownership policy, NER/Semantic AI and recovery behavior are not reduced for speed.
 

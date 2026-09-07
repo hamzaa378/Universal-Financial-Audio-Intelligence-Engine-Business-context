@@ -1,4 +1,4 @@
-"""Privacy-first PII detection for financial-call transcripts (v4.12).
+"""Privacy-first PII detection for financial-call transcripts (v5.0 correction-aware).
 
 Pipeline:
 ASR text -> ASR-aware normalization candidates -> deterministic validators -> optional
@@ -14,6 +14,7 @@ from typing import Iterable
 
 from decision_ai.privacy_judge import judge_many as semantic_judge_many, engine_status as semantic_engine_status
 from decision_ai.ner_engine import support_candidates as ner_support_candidates, status as ner_engine_status
+from nlp.corrections import resolve_text_corrections
 from nlp.normalization import (
     find_ifsc_candidates,
     find_spoken_email_candidates,
@@ -169,7 +170,7 @@ _PUBLIC_GEO_CONTEXT = re.compile(
 _EXAMPLE_CONTEXT = re.compile(
     r"(?i)\b(?:example|sample|documentation|docs?|tutorial|manual|article|test\s+(?:value|number|data|case)|"
     r"standard\s+test|literal\s+text|placeholder|template|configuration\s+file|source\s+code|"
-    r"unit[- ]?test|synthetic\s+benchmark|dataset\s+(?:column|example)|training\s+(?:video|document|material|guide)|"
+    r"unit[- ]?test|synthetic\s+(?:benchmark|identifiers?)|dataset\s+(?:column|example)|training\s+(?:video|document|material|guide)|"
     r"demonstrat(?:e|es|ed|ion))\b"
 )
 
@@ -423,7 +424,7 @@ def _resolve_conflicts(items: Iterable[dict]) -> list[dict]:
 
 # ---------- bounded NAME / ADDRESS / SECRET extraction ----------
 _NAME_LABEL = re.compile(
-    r"(?i)\b(?:my\s+(?:full\s+|registered\s+|legal\s+|official\s+|preferred\s+)?name\s+(?:is|would\s+be)|"
+    r"(?i)\b(?:my\s+(?:name|(?:(?:full|registered|legal|official|preferred|first|middle|last|given|family|maiden)\s+name)|surname)\s+(?:is|would\s+be)|"
     r"(?:customer|applicant|borrower|beneficiary|account\s+holder|cardholder)\s+name\s+is|"
     r"name\s+on\s+(?:my\s+)?(?:account|card|passport)\s+is|i\s+go\s+by|i\s+prefer\s+to\s+be\s+called|please\s+(?:call|address)\s+me\s+as|people\s+call\s+me|you\s+can\s+call\s+me|"
     r"name\s*[:=])\s+"
@@ -453,9 +454,37 @@ def _name_after_label(text: str, lo: int, *, require_two: bool=False, self_ident
     return _raw_item("NAME",s,e,value,conf,"self_identification_name" if self_identification else "token_bounded_name_context",ner_review=True)
 
 
+def _split_name_restart_after_label(text: str, label_end: int) -> list[dict] | None:
+    """Return two NAME candidates when ASR punctuation shows a plausible restart.
+
+    We deliberately do not decide here which one is correct. The audio/timing
+    correction resolver makes that decision later; text-only mode keeps both masked.
+    This avoids interpreting a comma before a location/title as a correction.
+    """
+    _,hi=_field_clause_bounds(text,label_end,label_end,140)
+    body=text[label_end:hi]
+    # Keep the grammar intentionally narrow: two compact name-like groups separated
+    # by a comma/ellipsis/dash, with no digits/address words/new field labels.
+    token=r"[A-Z][A-Za-z.'-]{0,30}"
+    pat=re.compile(rf"^\s*(?P<a>{token}(?:\s+{token}){{0,3}})\s*(?P<sep>,|…|\.\.\.|[-–—])\s*(?P<b>{token}(?:\s+{token}){{0,3}})(?=\s*(?:$|[.!?;]))")
+    m=pat.search(body)
+    if not m: return None
+    if ADDRESS_HINT.search(m.group('a')) or ADDRESS_HINT.search(m.group('b')): return None
+    if _FIELD_LABEL_CORE and re.search(rf"(?i)\b{_FIELD_LABEL_CORE}\b",m.group('b')): return None
+    out=[]
+    for name in ('a','b'):
+        s=label_end+m.start(name); e=label_end+m.end(name)
+        out.append(_raw_item('NAME',s,e,text[s:e],0.94,'name_restart_candidate',ownership_strength=4,correction_sequence_candidate=True))
+    return out
+
+
 def _find_name_candidates(text: str) -> list[dict]:
     out=[]
     for label in _NAME_LABEL.finditer(text):
+        split=_split_name_restart_after_label(text,label.end())
+        if split:
+            out.extend(split)
+            continue
         item=_name_after_label(text,label.end())
         if item: out.append(item)
     for label in _SELF_NAME_LABEL.finditer(text):
@@ -1275,7 +1304,14 @@ def detect_pii(
     reviewed=_fuse_ner_many(text,found,use_ner)
     reviewed=_fuse_semantic_many(text,reviewed,use_semantic)
     reviewed=_annotate_ownership(text,reviewed)
-    return _resolve_conflicts(x for x in reviewed if x["confidence"]>=min_confidence)
+    resolved=_resolve_conflicts(x for x in reviewed if x["confidence"]>=min_confidence)
+    # v5.0: punctuation/filler self-repairs can be resolved without an explicit
+    # correction keyword. The resolver only removes an earlier same-type value when
+    # the field episode and repair boundary are unambiguous; normal lists/alternate
+    # fields remain untouched. Audio-mode silent corrections are handled later with
+    # Whisper timing in pipeline.py.
+    resolved,_=resolve_text_corrections(text,resolved)
+    return resolved
 
 
 def semantic_status() -> dict:

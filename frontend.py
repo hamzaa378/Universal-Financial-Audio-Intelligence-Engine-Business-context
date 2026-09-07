@@ -16,7 +16,7 @@ PII_TYPES=["EMAIL","PHONE","PAN","IFSC","UPI","CARD","AADHAAR","ACCOUNT_NUMBER",
 
 st.set_page_config(page_title="Financial Audio Intelligence", page_icon="🎙️", layout="wide")
 st.title("Universal Financial Audio Intelligence Engine")
-st.caption("v4.12 Optimized STT-Guard — upload or record a call → transcribe, detect, mask and listen to a protected audio copy")
+st.caption("v5.0 Correction-Aware Privacy — upload or record a call → transcribe, resolve self-corrections, mask and listen to a protected audio copy")
 
 with st.sidebar:
     st.header("Privacy policy")
@@ -273,6 +273,16 @@ def _show_last_audio_result():
                     st.dataframe(rows,width="stretch",hide_index=True)
         else:
             st.caption("STT privacy recovery: no unresolved owned sensitive windows required a second decode.")
+
+    correction=r.get("privacy",{}).get("correction_resolution") or {}
+    if correction.get("count",0):
+        st.info(
+            f"Correction-aware masking resolved {correction.get('count',0)} self-repair(s): "
+            "the later committed value was protected and the superseded mistaken value was left unchanged."
+        )
+        with st.expander("Correction resolution audit"):
+            st.dataframe(correction.get("events",[]),width="stretch",hide_index=True)
+            st.caption("Audit rows contain spans/timing only; raw corrected values are not exposed here.")
 
     debug=r.get("privacy",{}).get("debug_bundle") or {}
     if debug.get("enabled"):

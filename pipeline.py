@@ -9,7 +9,7 @@ from ingest.tamper_detection import detect_tamper
 from asr.fintech_asr import transcribe
 from asr.privacy_recovery import recover_privacy_audio_intervals
 from nlp.language import annotate_segment_languages
-from nlp.pii import public_pii_metadata, semantic_status, ner_status, mask_pii
+from nlp.pii import public_pii_metadata, semantic_status, ner_status, mask_pii, detect_pii
 from nlp.profanity import public_profanity_metadata
 from nlp.sensitive_financial import public_sensitive_id_metadata
 from nlp.privacy import protect_text
@@ -22,6 +22,7 @@ from analysis_ai.diarization import diarize, assign_speakers
 from decision_ai.utterance_ai import analyze_utterance
 from audio_privacy import create_protected_audio
 from nlp.token_alignment import attach_entity_tokens
+from nlp.corrections import resolve_timed_corrections
 from config import SETTINGS
 from privacy_debug import write_privacy_debug_bundle
 
@@ -29,6 +30,46 @@ from privacy_debug import write_privacy_debug_bundle
 def _trust(asr_conf, quality, intent_conf, pii_conf=1.0):
     return round(max(0,min(1,0.48*asr_conf+0.22*quality+0.18*intent_conf+0.12*pii_conf)),3)
 
+
+
+
+def _correction_candidate_validator(kind: str, tail: str) -> list[dict]:
+    """Validate a possible restarted value with the normal v5 privacy validators.
+
+    The synthetic ownership prefix is never exposed and never becomes part of the
+    returned span. This helper is used only after an already-accepted owned PII value
+    and only for the timing-based self-correction resolver.
+    """
+    prefixes={
+        "NAME":"My name is ","PHONE":"My phone number is ","EMAIL":"My email is ",
+        "PAN":"My PAN is ","AADHAAR":"My Aadhaar number is ","IFSC":"My IFSC is ",
+        "UPI":"My UPI ID is ","CARD":"My card number is ","ACCOUNT_NUMBER":"My account number is ",
+        "OTP":"My OTP is ","CVV":"My CVV is ","PINCODE":"My PIN code is ",
+        "DOB":"My date of birth is ","PASSPORT":"My passport number is ",
+        "VOTER_ID":"My voter ID is ","DRIVING_LICENSE":"My driving licence number is ",
+        "ADDRESS":"My address is ","PASSWORD":"My password is ","USERNAME":"My username is ",
+        "API_KEY":"My API key is ","AUTH_TOKEN":"My auth token is ",
+    }
+    prefix=prefixes.get(kind)
+    if not prefix:
+        return []
+    lead_match=re.match(r"[\s,.;:…\-–—]*",tail or "")
+    lead=lead_match.end() if lead_match else 0
+    body=(tail or "")[lead:]
+    if not body:
+        return []
+    synthetic=prefix+body
+    out=[]
+    for e in detect_pii(synthetic,min_confidence=0.72,use_semantic=False,use_ner=False):
+        if e.get("type")!=kind:
+            continue
+        rs=int(e.get("start",0))-len(prefix)+lead
+        re_=int(e.get("end",0))-len(prefix)+lead
+        if rs<lead or re_<=rs or re_>len(tail):
+            continue
+        x=dict(e); x["start"]=rs; x["end"]=re_; x["value"]=tail[rs:re_]
+        out.append(x)
+    return out
 
 def _safe_financial_entities(entities: list[dict], include_raw: bool=False) -> list[dict]:
     if include_raw:
@@ -330,6 +371,24 @@ def run_pipeline(
     internal_privacy["pii"]=attach_entity_tokens(asr,list(internal_privacy.get("pii",[])))
     internal_privacy["financial_ids"]=attach_entity_tokens(asr,list(internal_privacy.get("financial_ids",[])))
     internal_privacy["profanity"]=attach_entity_tokens(asr,list(internal_privacy.get("profanity",[])))
+
+    # v5.0 correction resolver: after Whisper token/timing attachment, a later
+    # same-type value can supersede an earlier mistaken value even when the speaker
+    # never says "sorry", "correction" or "I mean".  The resolver can only choose
+    # between PII candidates already accepted by the normal detector, so it does not
+    # create new false-positive candidates.  Parallel fields (alternate/secondary/
+    # primary, lists joined by and/or, etc.) are explicitly excluded.
+    internal_privacy["pii"],correction_audit=resolve_timed_corrections(
+        text,internal_privacy["pii"],asr,candidate_validator=_correction_candidate_validator
+    )
+    if correction_audit:
+        # The earlier mistaken value must become visible again in the safe transcript
+        # while the final committed value remains masked. Re-render from the same
+        # already-decided spans; no detector or threshold is re-run.
+        text_analysis["safe_text"]=_render_safe_text(text,internal_privacy,mask_mode=mask_mode)
+        text_analysis["pii_count"]=len(internal_privacy["pii"])
+        vals=[float(x.get("confidence",0.0)) for x in internal_privacy["pii"]]
+        text_analysis["pii_mean_confidence"]=round(sum(vals)/len(vals),4) if vals else 1.0
     text_analysis["pii"]=public_pii_metadata(internal_privacy["pii"])
     timing["privacy_and_nlp"]=(time.perf_counter()-t)*1000
 
@@ -406,6 +465,11 @@ def run_pipeline(
             "raw_transcript_included":bool(include_raw),
             "asr_privacy_recovery":privacy_recovery,
             "audio_guard_markers":[{"type":g["type"],"start":g["start"],"end":g["end"],"replacement":g["replacement"]} for g in audio_guards],
+            "correction_resolution":{
+                "count":len(correction_audit),
+                "events":correction_audit,
+                "policy":"later committed value masked; superseded mistaken value left unmasked only when same-field repair evidence is strong",
+            },
         },
         "confidence":{
             "overall_trust":_trust(asr["confidence"],acoustic["quality"]["score"],text_analysis["intent"]["confidence"],text_analysis["pii_mean_confidence"]),
