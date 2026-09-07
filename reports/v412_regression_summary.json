@@ -1,0 +1,82 @@
+{
+  "pii_cases": {
+    "tp": 61,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "mask_failure_cases": 0,
+    "mean_ms": 0.4098971899854102
+  },
+  "context_precision_v46": {
+    "tp": 16,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "mask_failure_cases": 0,
+    "mean_ms": 0.34683669829542324
+  },
+  "context_recall_v47": {
+    "tp": 18,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "mask_failure_cases": 0,
+    "mean_ms": 0.29772683112039683
+  },
+  "precision_guard_v48": {
+    "tp": 8,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "mask_failure_cases": 0,
+    "mean_ms": 0.20519748204606003
+  },
+  "asr_robust_v49": {
+    "tp": 14,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "mask_failure_cases": 0,
+    "mean_ms": 0.48422694582275955
+  },
+  "stt_guard_v410": {
+    "tp": 4,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "mask_failure_cases": 0,
+    "mean_ms": 0.38931609742109846
+  },
+  "reliability_guard_v411": {
+    "tp": 6,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "mask_failure_cases": 0,
+    "mean_ms": 0.3590601135034081
+  },
+  "optimized_guard_v412": {
+    "tp": 3,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "mask_failure_cases": 0,
+    "mean_ms": 0.5742559646959682
+  }
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 import time
 
 from ingest.audio_loader import load_audio
@@ -53,7 +54,78 @@ def _policy_kwargs(privacy_profile,use_semantic_ai,use_ner_ai,mask_mode,mask_typ
     )
 
 
-def _safe_transcription(asr: dict, safe_text: str, internal_privacy: dict, *, mask_mode: str="full") -> dict:
+def _audio_guard_replacements(text: str, recovery: dict) -> list[dict]:
+    """Build privacy-safe transcript markers for conservative audio guards.
+
+    The marker never contains alternate ASR text or a guessed identifier. It only
+    communicates that the corresponding audio interval was protected.
+    """
+    out=[]
+    for row in (recovery or {}).get("audit",[]) or []:
+        if row.get("status")!="conservative_audio_guard":
+            continue
+        try:
+            start=max(0,int(row.get("char_start",0)))
+            end=min(len(text),int(row.get("char_end",start)))
+        except Exception:
+            continue
+        if end<=start:
+            continue
+        kind=str(row.get("type","PII"))
+        raw=text[start:end]
+        stripped=raw.strip()
+        # Preserve a natural, non-sensitive ownership phrase when possible.
+        if row.get("source")=="followup_expectation" and re.match(r"(?i)^mine\b",stripped):
+            repl=f"Mine is [{kind} AUDIO PROTECTED]."
+            # When the bounded response ends directly before a comma introducing the
+            # next field, consume only that comma so we do not emit '. ,'.
+            if end < len(text) and text[end]==',':
+                end+=1
+        elif re.match(r"(?i)^i\s+(?:received|got)\b",stripped):
+            verb="received" if re.match(r"(?i)^i\s+received\b",stripped) else "got"
+            repl=f"I {verb} [{kind} AUDIO PROTECTED]."
+            if end < len(text) and text[end]==',':
+                end+=1
+        else:
+            repl=f"[{kind} AUDIO PROTECTED]"
+        out.append({"start":start,"end":end,"replacement":repl,"type":kind})
+    return out
+
+
+def _render_safe_text(text: str, internal_privacy: dict, *, mask_mode: str="full", audio_guards: list[dict] | None=None) -> str:
+    """Render one authoritative safe transcript from already-decided spans.
+
+    This prevents a second detector pass and lets audio-only recovery markers coexist
+    with normal PII/financial/profanity masking without exposing alternate ASR text.
+    """
+    replacements=[]
+    for e in internal_privacy.get("pii",[]):
+        s=max(0,int(e.get("start",0))); en=min(len(text),int(e.get("end",s)))
+        if en<=s: continue
+        local={**e,"start":0,"end":en-s,"value":text[s:en]}
+        repl=mask_pii(text[s:en],[local],mode=mask_mode)
+        replacements.append((s,en,repl,30))
+    for e in internal_privacy.get("financial_ids",[]):
+        s=max(0,int(e.get("start",0))); en=min(len(text),int(e.get("end",s)))
+        if en>s: replacements.append((s,en,f"[{e.get('type','SENSITIVE_ID')} REDACTED]",20))
+    for e in internal_privacy.get("profanity",[]):
+        s=max(0,int(e.get("start",0))); en=min(len(text),int(e.get("end",s)))
+        if en>s: replacements.append((s,en,"[BLEEP]",10))
+    for g in audio_guards or []:
+        s=max(0,int(g.get("start",0))); en=min(len(text),int(g.get("end",s)))
+        if en>s: replacements.append((s,en,str(g.get("replacement","[AUDIO PROTECTED]")),40))
+    replacements.sort(key=lambda x:(x[3],x[1]-x[0]),reverse=True)
+    kept=[]
+    for r in replacements:
+        if not any(r[0] < k[1] and k[0] < r[1] for k in kept):
+            kept.append(r)
+    safe=text
+    for st,en,repl,_ in sorted(kept,key=lambda x:x[0],reverse=True):
+        safe=safe[:st]+repl+safe[en:]
+    return safe
+
+
+def _safe_transcription(asr: dict, safe_text: str, internal_privacy: dict, *, mask_mode: str="full", audio_guards: list[dict] | None=None) -> dict:
     """Build safe transcript views by reusing already-computed privacy spans.
 
     v4.3 re-ran PII/semantic detection for every ASR segment. v4.4 instead maps the
@@ -94,6 +166,13 @@ def _safe_transcription(asr: dict, safe_text: str, internal_privacy: dict, *, ma
             if e["start"] >= ge or e["end"] <= gs: continue
             ls=max(0,e["start"]-gs); le=min(len(seg_text),e["end"]-gs)
             replacements.append((ls,le,"[BLEEP]",1))
+        for g in audio_guards or []:
+            if g["start"] >= ge or g["end"] <= gs: continue
+            ls=max(0,g["start"]-gs); le=min(len(seg_text),g["end"]-gs)
+            # A guard can rarely straddle Whisper segments. Emit the marker only in
+            # the segment that owns its start and blank any continuation portion.
+            repl=g["replacement"] if gs <= g["start"] < ge else ""
+            replacements.append((ls,le,repl,4))
         replacements.sort(key=lambda x:(x[3],x[1]-x[0]),reverse=True)
         kept=[]
         for r in replacements:
@@ -213,8 +292,12 @@ def run_pipeline(
     timing["audio_load"]=(time.perf_counter()-t)*1000
 
     t=time.perf_counter()
+    ta=time.perf_counter()
     acoustic=analyze_acoustics(audio,sr)
+    timing["acoustic_analysis"]=(time.perf_counter()-ta)*1000
+    tt=time.perf_counter()
     tamper=detect_tamper(audio,sr)
+    timing["tamper_analysis"]=(time.perf_counter()-tt)*1000
     timing["signal_analysis"]=(time.perf_counter()-t)*1000
 
     # v4.4 passes the already-decoded 16 kHz waveform directly to Faster-Whisper.
@@ -251,7 +334,8 @@ def run_pipeline(
     timing["privacy_and_nlp"]=(time.perf_counter()-t)*1000
 
     protected_audio=None
-    privacy_recovery={"enabled":False,"plans":0,"audit":[],"audio_interval_count":0,"telemetry":{"windows_planned":0,"windows_attempted":0,"recovered":0,"guarded":0,"unresolved":0,"decode_inference_ms":0.0,"total_ms":0.0}}
+    audio_guards=[]
+    privacy_recovery={"enabled":False,"plans":0,"audit":[],"audio_interval_count":0,"telemetry":{"windows_planned":0,"windows_attempted":0,"recovered":0,"guarded":0,"unresolved":0,"decode_inference_ms":0.0,"total_ms":0.0,"by_type":{}}}
     if create_audio_output:
         t=time.perf_counter()
         recovery_enabled=SETTINGS.privacy_redecode if asr_privacy_recovery is None else bool(asr_privacy_recovery)
@@ -276,10 +360,13 @@ def run_pipeline(
                 # the normal detector/audio-redaction result.
                 privacy_recovery={
                     "enabled":True,"plans":0,"audit":[],"audio_interval_count":0,
-                    "telemetry":{"windows_planned":0,"windows_attempted":0,"recovered":0,"guarded":0,"unresolved":0,"decode_inference_ms":0.0,"total_ms":0.0},
+                    "telemetry":{"windows_planned":0,"windows_attempted":0,"recovered":0,"guarded":0,"unresolved":0,"decode_inference_ms":0.0,"total_ms":0.0,"by_type":{}},
                     "error":f"{type(exc).__name__}: {exc}",
                 }
             timing["privacy_redecode"]=(time.perf_counter()-rt)*1000
+            audio_guards=_audio_guard_replacements(text,privacy_recovery)
+            if audio_guards:
+                text_analysis["safe_text"]=_render_safe_text(text,internal_privacy,mask_mode=mask_mode,audio_guards=audio_guards)
         all_sensitive=list(internal_privacy.get("pii",[]))+list(internal_privacy.get("financial_ids",[]))
         protected_audio=create_protected_audio(
             audio_path,asr,all_sensitive,internal_privacy.get("profanity",[]),
@@ -293,7 +380,7 @@ def run_pipeline(
             "tamper_screen":tamper,
             "diarization":dia,
         },
-        "transcription":asr if include_raw else _safe_transcription(asr,text_analysis["safe_text"],internal_privacy,mask_mode=mask_mode),
+        "transcription":asr if include_raw else _safe_transcription(asr,text_analysis["safe_text"],internal_privacy,mask_mode=mask_mode,audio_guards=audio_guards),
         "understanding":{
             "intent":text_analysis["intent"],
             "financial_entities":_safe_financial_entities(text_analysis["financial_entities"],include_raw=include_raw),
@@ -318,6 +405,7 @@ def run_pipeline(
             "ner_ai":text_analysis.get("ner_ai",{}),
             "raw_transcript_included":bool(include_raw),
             "asr_privacy_recovery":privacy_recovery,
+            "audio_guard_markers":[{"type":g["type"],"start":g["start"],"end":g["end"],"replacement":g["replacement"]} for g in audio_guards],
         },
         "confidence":{
             "overall_trust":_trust(asr["confidence"],acoustic["quality"]["score"],text_analysis["intent"]["confidence"],text_analysis["pii_mean_confidence"]),

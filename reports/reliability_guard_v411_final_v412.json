@@ -1,0 +1,81 @@
+{
+  "dataset": {
+    "pii_cases": 8,
+    "profanity_cases": 29,
+    "note": "Synthetic regression benchmark; validate with consented/labeled real call data before production claims."
+  },
+  "pii": {
+    "tp": 6,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "false_discovery_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "negative_cases": 3,
+    "negative_cases_with_fp": 0,
+    "negative_case_false_positive_rate": 0.0,
+    "mask_failure_cases": 0
+  },
+  "pii_threshold_sweep": {
+    "0.80": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.90": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.93": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.95": {
+      "precision": 1.0,
+      "recall": 0.6666666666666666,
+      "f1": 0.8,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.97": {
+      "precision": 1.0,
+      "recall": 0.5,
+      "f1": 0.6666666666666666,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    }
+  },
+  "profanity": {
+    "tp": 17,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "false_discovery_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "negative_cases": 12,
+    "negative_cases_with_fp": 0,
+    "negative_case_false_positive_rate": 0.0,
+    "mask_failure_cases": 0
+  },
+  "text_privacy_efficiency": {
+    "evaluations": 185,
+    "total_seconds": 0.06657032300017818,
+    "cases_per_second": 2779.0161090176,
+    "mean_ms": 0.3590601135034081,
+    "p50_ms": 0.1324569998359948,
+    "p95_ms": 1.7594740002095932,
+    "p99_ms": 2.003901000080077
+  }
+}

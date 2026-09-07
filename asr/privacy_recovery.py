@@ -1,4 +1,4 @@
-"""Expectation-aware ASR privacy recovery (v4.11).
+"""Expectation-aware ASR privacy recovery (v4.12).
 
 This module is deliberately audio-privacy oriented.  It never invents or publishes a
 missing identifier.  When the primary transcript strongly implies that the next short
@@ -59,6 +59,14 @@ _OWNED_RECOVERY_STARTS = (
 )
 _RECOVERY_NEXT_FIELD = re.compile(
     r"(?i)(?:,\s*|\s+)(?:and\s+)?(?:(?:my|the|your)\s+)?(?:name|phone|mobile|email|account|ifsc|pan|upi|aadhaar|aadhar|otp|cvv|address|dob|date\s+of\s+birth|passport|driving\s+licen[cs]e|card|transaction|complaint|order|reference|product\s+batch)\b"
+)
+# v4.12: documentation/example material is a *hard* ownership boundary.  This is
+# narrower than the semantic example veto: it is used only to stop raw/recovery spans
+# from swallowing the next non-personal clause when ASR omitted punctuation.
+_RECOVERY_HARD_BOUNDARY = re.compile(
+    r"(?i)(?:[;!?]\s*|,\s*(?:and\s+|but\s+)?|\s+(?:and|but|while|whereas)\s+)"
+    r"(?:(?:the|a|an)\s+)?(?:software\s+manual|documentation|docs?|tutorial|training\s+(?:document|video|material|guide)|"
+    r"test\s+(?:value|number|card|data|case)|sample|example|demonstration|product\s+batch|shipment\s+reference|invoice\s+reference|reference\s+(?:number|document))\b"
 )
 _PHONETIC_CONTINUATION = re.compile(
     r"(?i)^\s*(?:alpha|bravo|charlie|delta|echo|foxtrot|golf|hotel|india|juliett?|kilo|lima|mike|november|oscar|papa|quebec|romeo|sierra|tango|uniform|victor|whiskey|x-?ray|yankee|zulu|zero|oh|one|two|three|four|five|six|seven|eight|nine|[A-Z]|\d)\b"
@@ -133,9 +141,10 @@ def _owned_assignments(text: str, start: int=0, end: int | None=None) -> list[di
 
 def _bounded_owned_char_end(text: str, value_start: int, sentence_end: int) -> int:
     end=sentence_end
-    m=_RECOVERY_NEXT_FIELD.search(text,value_start,end)
-    if m:
-        end=min(end,m.start())
+    for pat in (_RECOVERY_NEXT_FIELD,_RECOVERY_HARD_BOUNDARY):
+        m=pat.search(text,value_start,end)
+        if m:
+            end=min(end,m.start())
     return max(value_start,end)
 
 
@@ -166,7 +175,7 @@ def _append_plan(plans: list[dict], asr: dict, *, kind: str, start: int, end: in
 def plan_privacy_recovery(asr: dict, accepted_pii: Iterable[dict], *, max_windows: int=4) -> list[dict]:
     """Plan bounded recovery windows for unresolved sensitive ownership.
 
-    v4.11 has two recovery lanes:
+    v4.12 retains two recovery lanes:
     1) a one-shot follow-up expectation ("Please enter your CVV. Mine is ..."); and
     2) an explicit owned field whose primary ASR value is malformed ("my name is 2210").
 
@@ -194,9 +203,10 @@ def plan_privacy_recovery(asr: dict, accepted_pii: Iterable[dict], *, max_window
         response=text[n0:n1]
         if not _RECOVERY_RESPONSE.search(response) or _NO_VALUE_RESPONSE.search(response):
             continue
-        if _accepted_in_span(pii,expected,n0,n1):
+        response_end=_bounded_owned_char_end(text,n0,n1)
+        if _accepted_in_span(pii,expected,n0,response_end):
             continue
-        _append_plan(plans,asr,kind=expected,start=n0,end=n1,
+        _append_plan(plans,asr,kind=expected,start=n0,end=response_end,
                      reason="one_shot_expected_field_missing",source="followup_expectation")
 
     # Lane B: same-sentence explicit ownership with no accepted entity. This is the
@@ -346,22 +356,35 @@ def recover_privacy_audio_intervals(
     telemetry={
         "windows_planned":len(plans),"windows_attempted":0,"recovered":0,
         "guarded":0,"unresolved":0,"decode_inference_ms":0.0,"total_ms":0.0,
+        "by_type":{},
     }
+    def _type_stats(kind: str) -> dict:
+        return telemetry["by_type"].setdefault(kind,{
+            "planned":0,"attempted":0,"recovered":0,"guarded":0,"unresolved":0,"decode_inference_ms":0.0
+        })
+    for p in plans:
+        _type_stats(str(p.get("type","PII")))["planned"]+=1
     for plan in plans:
+        kind=str(plan.get("type","PII"))
+        tstats=_type_stats(kind)
         telemetry["windows_attempted"]+=1
+        tstats["attempted"]+=1
         dt=time.perf_counter()
         alt=_decode_window(audio,sr,plan,model_name)
         decode_ms=(time.perf_counter()-dt)*1000.0
         telemetry["decode_inference_ms"]+=decode_ms
+        tstats["decode_inference_ms"]+=decode_ms
         confirmed=_confirm_expected(plan["type"],alt)
         if confirmed:
             intervals.append(confirmed)
             telemetry["recovered"]+=1
+            tstats["recovered"]+=1
             audit.append({
                 "type":plan["type"],"status":"confirmed_alternate_decode",
                 "source":plan.get("source"),"reason":plan.get("reason"),
                 "time_start":round(float(plan["time_start"]),3),"time_end":round(float(plan["time_end"]),3),
                 "primary_alignment_confidence":plan["primary_alignment_confidence"],
+                "char_start":int(plan.get("char_start",0)),"char_end":int(plan.get("char_end",0)),
                 "alternate_asr_confidence":confirmed.get("alignment_confidence"),
                 "decode_ms":round(decode_ms,3),"alternate_text_present":bool(alt.get("text")),
             })
@@ -375,20 +398,27 @@ def recover_privacy_audio_intervals(
                 "alignment_method":"expected_field_conservative_window",
                 "alignment_confidence":float(plan["primary_alignment_confidence"]),
                 "recovery_status":"conservative_audio_guard",
+                "char_start":int(plan.get("char_start",0)),"char_end":int(plan.get("char_end",0)),
+                "source":plan.get("source"),"reason":plan.get("reason"),
             })
             status="conservative_audio_guard"
             telemetry["guarded"]+=1
+            tstats["guarded"]+=1
         else:
             status="unresolved"
             telemetry["unresolved"]+=1
+            tstats["unresolved"]+=1
         audit.append({
             "type":plan["type"],"status":status,"source":plan.get("source"),"reason":plan.get("reason"),
             "time_start":round(float(plan["time_start"]),3),"time_end":round(float(plan["time_end"]),3),
             "primary_alignment_confidence":plan["primary_alignment_confidence"],
+            "char_start":int(plan.get("char_start",0)),"char_end":int(plan.get("char_end",0)),
             "alternate_decode_error":bool(alt.get("error")),"decode_ms":round(decode_ms,3),
             "alternate_text_present":bool(alt.get("text")),
         })
     telemetry["decode_inference_ms"]=round(float(telemetry["decode_inference_ms"]),3)
+    for stats in telemetry.get("by_type",{}).values():
+        stats["decode_inference_ms"]=round(float(stats.get("decode_inference_ms",0.0)),3)
     telemetry["total_ms"]=round((time.perf_counter()-total0)*1000.0,3)
     return {"plans":len(plans),"intervals":intervals,"audit":audit,"telemetry":telemetry}
 

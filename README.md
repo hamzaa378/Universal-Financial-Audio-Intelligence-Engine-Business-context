@@ -1,6 +1,6 @@
-# Universal Financial Audio Intelligence Engine — v4.11 Reliability-Guard Privacy Hybrid
+# Universal Financial Audio Intelligence Engine — v4.12 Optimized STT-Guard Privacy Hybrid
 
-v4.11 keeps the v4.10 STT guard and strengthens reliability around real ASR failures: expected fields are one-shot, raw fallback spans have hard clause/token/character boundaries, malformed owned fields can trigger same-sentence recovery, phonetic IFSC dictation can survive one ASR punctuation split, and the recovery controller exposes privacy-safe telemetry. An opt-in raw-vs-safe debug bundle can determine whether missing text came from ASR or from redaction without enabling raw logging by default.
+v4.12 retains the v4.11 reliability architecture, adds explicit `[TYPE AUDIO PROTECTED]` markers for conservatively guarded speech, makes documentation/example transitions hard raw-span boundaries, adds per-entity recovery telemetry, and removes major pre-ASR runtime overhead with a fast SoundFile/SOXR loader plus vectorized NumPy acoustic analysis. Privacy thresholds, ASR profiles, mask padding, ownership policy, NER/Semantic AI and recovery behavior are not reduced for speed.
 
 ## Processing architecture
 
@@ -38,6 +38,20 @@ Audio / microphone
 ```
 
 
+## v4.12 optimized STT-guard improvements
+
+- **Safe audio-guard transcript markers:** if a targeted privacy re-decode still cannot reconstruct a sensitive value but the bounded audio is beeped/muted, the safe transcript now shows a marker such as `Mine is [CVV AUDIO PROTECTED].` rather than leaving corrupted wording like `Mine ID`. The marker never contains guessed or alternate-ASR PII.
+- **Hard documentation/example boundaries:** ownership-gated raw spans and recovery windows stop before manual/documentation/training/test/example clauses, even when ASR loses punctuation.
+- **Per-entity recovery telemetry:** planned/attempted/recovered/guarded/unresolved counts and targeted-decode milliseconds are summarized by PII type and shown in the frontend.
+- **Fast lossless-equivalent WAV/FLAC-style loading path:** SoundFile + SOXR HQ replaces high-overhead `librosa.load` when the container is directly supported. Unsupported containers retain the Librosa fallback.
+- **Vectorized NumPy acoustic analysis:** removes the expensive Librosa spectral/onset hot path and its possible first-run JIT overhead. PII masking does not depend on the auxiliary stress marker.
+- **More detailed performance metrics:** `acoustic_analysis` and `tamper_analysis` are reported separately in addition to total `signal_analysis`.
+- **No privacy-speed trade:** v4.12 does not lower detector thresholds, shrink audio padding, disable AI checks, use a smaller ASR model, or skip STT recovery.
+
+Local packaging regressions: **90/90 unit tests**, with all v4.4-v4.12 synthetic privacy suites retaining 0 FP / 0 FN. See `V4_12_CHANGES.md` and `LIMITATIONS_V4_12.md`.
+
+To profile only the optimized audio-load/signal stage on your Windows recording without paying for ASR, run `profile_pre_asr.bat "C:\path\to\audio.wav"`.
+
 ## v4.11 reliability-guard improvements
 
 - **One-shot typed expected-field state:** a field expectation is consumed once and is never propagated when the introducing sentence already supplied that field. This prevents `CVV 391` from contaminating later values such as `482 transactions`.
@@ -50,7 +64,7 @@ Audio / microphone
 - **Opt-in raw/final debug comparison:** `FINAI_PRIVACY_DEBUG_ARTIFACTS=1` writes raw ASR, safe transcript, redaction spans, recovery telemetry and hashes to a diagnostic folder. It is disabled by default because the raw file contains PII.
 - **NER installer path fix retained:** the optional NER installer adds the project root to `PYTHONPATH` and the helper script is independently import-safe.
 
-See `V4_11_CHANGES.md` and `LIMITATIONS_V4_11.md`.
+See `V4_11_CHANGES.md` and `LIMITATIONS_V4_11.md` for the previous reliability layer.
 
 ## v4.10 STT-guard improvements
 

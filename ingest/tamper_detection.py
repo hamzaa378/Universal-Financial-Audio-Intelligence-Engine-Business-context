@@ -5,7 +5,9 @@ def detect_tamper(audio, sr=16000):
     if len(x)<sr: return {"risk":"UNKNOWN","score":0.5,"confidence":0.35,"signals":["audio_too_short"]}
     # Detect abrupt discontinuities and suspiciously repeated blocks. This is forensic triage, not proof of tampering.
     diff=np.abs(np.diff(x))
-    jump_thr=max(0.25,float(np.median(diff)+18*np.median(np.abs(diff-np.median(diff)))))
+    med=float(np.median(diff))
+    mad=float(np.median(np.abs(diff-med)))
+    jump_thr=max(0.25,med+18*mad)
     jump_rate=float(np.mean(diff>jump_thr))
     block=sr//2
     hashes=[]

@@ -14,7 +14,6 @@ from typing import Iterable
 
 from nlp.token_alignment import global_word_map
 
-import librosa
 import numpy as np
 import soundfile as sf
 
@@ -194,6 +193,9 @@ def create_protected_audio(
 ) -> dict:
     """Create a WAV with sensitive intervals replaced by a tone or silence."""
     if preloaded_audio is None:
+        # Normal pipeline passes preloaded audio. Keep Librosa as a lazy compatibility
+        # fallback so importing the privacy stack does not pay its startup cost.
+        import librosa
         audio, sr=librosa.load(audio_path, sr=None, mono=True)
         audio=np.nan_to_num(audio.astype(np.float32))
     else:

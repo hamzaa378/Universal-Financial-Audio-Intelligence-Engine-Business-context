@@ -1,0 +1,5 @@
+{"id":"v412_ifsc_doc_boundary","text":"My bank IFSC is Hotel Delta Foxtrott ID Charlie 00001234, and the software manual uses HDFC 0001234 as an example IFSC.","expected":[{"type":"IFSC","value":"Hotel Delta Foxtrott ID Charlie 00001234"}]}
+{"id":"v412_cvv_quantity","text":"The CVV on my card is 391. There were 482 transactions yesterday.","expected":[{"type":"CVV","value":"391"}]}
+{"id":"v412_spoken_email_explanation","text":"The training document says that an email can be spoken as name dot surname at domain dot com.","expected":[]}
+{"id":"v412_public_pin","text":"The postal code 411001 covers part of Pune.","expected":[]}
+{"id":"v412_card_test_boundary","text":"My credit card number is 4111-1111-111, and the payment gateway documentation uses 4242-4242-4242-4242 as a standard test card.","expected":[{"type":"CARD","value":"4111-1111-111"}]}

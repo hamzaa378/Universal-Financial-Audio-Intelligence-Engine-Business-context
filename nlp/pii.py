@@ -1,4 +1,4 @@
-"""Privacy-first PII detection for financial-call transcripts (v4.11).
+"""Privacy-first PII detection for financial-call transcripts (v4.12).
 
 Pipeline:
 ASR text -> ASR-aware normalization candidates -> deterministic validators -> optional
@@ -203,6 +203,12 @@ _ROLE_RESET = re.compile(
     r",(?=\s*(?:there\s+(?:were|was|are|is)|we\s+(?:processed|handled|received)|they\s+(?:processed|handled)|"
     r"this\s+(?:was|is)|that\s+(?:was|is))\b))"
 )
+_DOC_ROLE_RESET = re.compile(
+    r"(?i)(?:,\s*|\s+)(?:and\s+|but\s+)?(?:(?:the|a|an)\s+)?"
+    r"(?:software\s+manual|documentation|docs?|tutorial|training\s+(?:document|video|material|guide)|"
+    r"test\s+(?:value|number|card|data|case)|sample|example|demonstration)\b"
+)
+
 
 # Field-aware clause segmentation. Sentence-level context is too broad for utterances
 # such as "my name is X, DOB Y, phone Z, email example dot com" because the word
@@ -268,6 +274,7 @@ def _role_left_context(text: str, start: int, radius: int = 96) -> str:
     lo,_=_field_clause_bounds(text,start,start,max(radius,150))
     left=text[max(lo,start-radius):start]
     cuts=[m.end() for m in _ROLE_RESET.finditer(left)]
+    cuts.extend(m.end() for m in _DOC_ROLE_RESET.finditer(left))
     return left[max(cuts) if cuts else 0:]
 
 
@@ -663,6 +670,18 @@ _FIELDISH_STOP = re.compile(
     r"(?i)(?:,\s*|\s+)(?:and\s+)?(?:(?:my|your|the)\s+)?(?:phone|mobile|email|account|ifsc|pan|upi|otp|cvv|address|dob|date\s+of\s+birth|passport|driving\s+licen[cs]e|transaction|complaint|order|reference|"
     r"product\s+batch|batch(?:\s+code)?|asset\s+code|document\s+template|page\s+(?:id|identifier|number)|support\s+ticket|shipment\s+reference|invoice\s+reference)\b"
 )
+
+# v4.12 hard mask-span boundary for documentation/example clauses. Unlike the broad
+# semantic veto, this requires clause-transition language so domains such as
+# `example.com` cannot truncate a genuine email/value.
+_RAW_HARD_CONTEXT_STOP = re.compile(
+    r"(?i)(?:[;!?]\s*|,\s*(?:and\s+|but\s+)?|\s+(?:and|but|while|whereas)\s+)"
+    r"(?:(?:the|a|an)\s+)?(?:software\s+manual|documentation|docs?|tutorial|training\s+(?:document|video|material|guide)|"
+    r"test\s+(?:value|number|card|data|case)|sample|example|demonstration|product\s+batch|shipment\s+reference|invoice\s+reference|reference\s+(?:number|document))\b"
+)
+_RAW_EXAMPLE_SUFFIX_STOP = re.compile(
+    r"(?i)\s+(?:is\s+)?(?:only\s+)?(?:used\s+)?as\s+(?:an?\s+)?(?:example|sample|test\s+value)\b"
+)
 _CROSS_SENTENCE_IFSC_ASSIGN = re.compile(
     r"(?is)\b(?:my\s+)?(?:bank\s+)?ifsc(?:\s+code)?\s+(?:is|:|=)\s*"
     r"(?P<head>[^.!?\n]{2,42})[.!?]\s*(?P<tail>[^.!?\n]{1,42})"
@@ -702,6 +721,13 @@ def _clamp_raw_fallback(text: str, start: int, tentative_end: int, kind: str) ->
     _,clause_hi=_field_clause_bounds(text,start,start,260)
     end=min(len(text),tentative_end,clause_hi,start+_FALLBACK_CHAR_LIMIT.get(kind,72))
     raw=text[start:end]
+    # Hard stop before a new documentation/example/reference clause even when ASR
+    # omitted sentence punctuation. This protects precision and mask geometry without
+    # relaxing any positive detector threshold.
+    for pat in (_RAW_HARD_CONTEXT_STOP,_RAW_EXAMPLE_SUFFIX_STOP):
+        m=pat.search(raw)
+        if m:
+            raw=raw[:m.start()]
     raw=_trim_fallback_value(raw)
     token_limit=_FALLBACK_TOKEN_LIMIT.get(kind,12)
     tokens=list(re.finditer(r"\S+",raw))

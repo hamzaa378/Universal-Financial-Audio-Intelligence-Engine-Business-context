@@ -1,0 +1,60 @@
+{
+  "synthetic_audio_duration_s": 60,
+  "source_sr": 48000,
+  "target_sr": 16000,
+  "v4_11": {
+    "audio_load_ms": 2455.3094769999007,
+    "signal_analysis_ms": 371.6831249998904,
+    "quality": {
+      "score": 0.462,
+      "snr_db_proxy": 0.03,
+      "silence_ratio": 0.0,
+      "clipping_ratio": 0.0,
+      "zero_crossing_rate": 0.0275,
+      "issues": [
+        "low_snr",
+        "low_volume"
+      ],
+      "confidence": 0.82
+    },
+    "stress": {
+      "stress_marker_score": 0.081,
+      "level": "low",
+      "confidence": 0.55,
+      "method": "shared_acoustic_features",
+      "note": "Acoustic marker only; not a clinical or psychological diagnosis."
+    },
+    "samples": 960000,
+    "sr": 16000
+  },
+  "v4_12": {
+    "audio_load_ms": 38.56320700015203,
+    "signal_analysis_ms": 62.027467000007164,
+    "quality": {
+      "score": 0.462,
+      "snr_db_proxy": 0.03,
+      "silence_ratio": 0.0,
+      "clipping_ratio": 0.0,
+      "zero_crossing_rate": 0.0275,
+      "issues": [
+        "low_snr",
+        "low_volume"
+      ],
+      "confidence": 0.82
+    },
+    "stress": {
+      "stress_marker_score": 0.067,
+      "level": "low",
+      "confidence": 0.55,
+      "method": "shared_acoustic_features_fast_numpy",
+      "note": "Acoustic marker only; not a clinical or psychological diagnosis."
+    },
+    "samples": 960000,
+    "sr": 16000
+  },
+  "speedup": {
+    "audio_load_x": 63.66974294928896,
+    "signal_analysis_x": 5.992234456387643,
+    "combined_pre_asr_x": 28.10392345114734
+  }
+}

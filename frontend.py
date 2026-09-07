@@ -16,7 +16,7 @@ PII_TYPES=["EMAIL","PHONE","PAN","IFSC","UPI","CARD","AADHAAR","ACCOUNT_NUMBER",
 
 st.set_page_config(page_title="Financial Audio Intelligence", page_icon="🎙️", layout="wide")
 st.title("Universal Financial Audio Intelligence Engine")
-st.caption("Upload or record a call → send it to the backend → transcribe, detect, mask and listen to a protected audio copy")
+st.caption("v4.12 Optimized STT-Guard — upload or record a call → transcribe, detect, mask and listen to a protected audio copy")
 
 with st.sidebar:
     st.header("Privacy policy")
@@ -264,6 +264,13 @@ def _show_last_audio_result():
                     st.dataframe(audit,width="stretch",hide_index=True)
                 else:
                     st.info("No recovery audit rows were produced.")
+                by_type=tel.get("by_type") or {}
+                if by_type:
+                    rows=[]
+                    for kind,stats in by_type.items():
+                        rows.append({"type":kind,**stats})
+                    st.caption("Per-entity recovery telemetry")
+                    st.dataframe(rows,width="stretch",hide_index=True)
         else:
             st.caption("STT privacy recovery: no unresolved owned sensitive windows required a second decode.")
 
