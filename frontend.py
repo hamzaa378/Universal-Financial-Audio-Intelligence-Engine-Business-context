@@ -16,7 +16,7 @@ PII_TYPES=["EMAIL","PHONE","PAN","IFSC","UPI","CARD","AADHAAR","ACCOUNT_NUMBER",
 
 st.set_page_config(page_title="Financial Audio Intelligence", page_icon="🎙️", layout="wide")
 st.title("Universal Financial Audio Intelligence Engine")
-st.caption("v5.0 Correction-Aware Privacy — upload or record a call → transcribe, resolve self-corrections, mask and listen to a protected audio copy")
+st.caption("v5.1 Privacy Hardening — upload or record a call → transcribe, resolve self-corrections, mask and listen to a protected audio copy")
 
 with st.sidebar:
     st.header("Privacy policy")

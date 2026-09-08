@@ -1,0 +1,28 @@
+# v5.1 remaining limitations, remedies and trade-offs
+
+The table below excludes language coverage and country-specific financial-format coverage and focuses on the remaining engineering/privacy limitations.
+
+| Limitation | Severity | Possible remedy | Difficulty | Negative effects / trade-offs |
+|---|---|---|---:|---|
+| Primary ASR and targeted recovery can both delete a sensitive value | High | N-best/lattice access, a specialized digit/alphanumeric recognizer, or an additional ultra-short recovery profile for only the highest-risk fields | High | Extra GPU work and latency; more hypotheses can increase recovery ambiguity. Conservative audio guard remains safer than guessing. |
+| The ownership cue itself can be deleted by ASR | High | Acoustic/turn-level expectation model using neighboring prompts and conversation state | High | Longer context memory can connect unrelated later speech and increase over-redaction if not tightly bounded. |
+| Diarization is still optional and disabled by default | High | Enable a tested diarization backend and calibrate speaker ownership | High | Significant model/runtime cost, RAM/VRAM use, model-download/access requirements and speaker-label errors. v5.1 only uses speaker labels when already available. |
+| Overlapping speakers can remain ambiguous even with diarization | High | Speech separation/source separation before ASR plus speaker-attributed transcription | Very High | Large compute increase, separation artifacts and possible ASR degradation. |
+| A superseded mistaken value may itself be real sensitive information | High | Optional `mask_superseded_values` policy or independent-history protection | Low-Medium | Masks more speech/text and reduces the “only final value hidden” presentation behavior. v5.1 now keeps it masked if the same value is independently owned elsewhere. |
+| Partial self-corrections are not reconstructed (`... last digit one`) | Medium-High | Typed edit-state machine for suffix/prefix/digit-position repairs | Medium-High | Incorrect edit interpretation can reconstruct the wrong identifier or create false positives. Current behavior does not guess. |
+| Address correction/restart handling remains conservative | Medium-High | Address-specific edit state plus structured address parser and pause-aware component ownership | High | Address spans are open-ended; aggressive repair logic can swallow public locations or neighboring fields. |
+| Address detection itself remains heuristic | High | Dedicated address parser/NER with ownership model | High | Additional model latency and risk of masking public place names. |
+| Recovery windows are capped | Medium-High | Dynamic risk-based budget based on call duration and unresolved field severity | Medium | More recovery windows increase GPU latency on noisy calls. |
+| ASR punctuation can still split uncommon identifiers in unexpected places | Medium-High | Type-specific timestamp continuation state for more identifier types | Medium | Larger continuation windows can over-mask neighboring prose. |
+| Unknown **unlabeled** secrets can still be missed | Medium-High | Entropy/secret classifier or organization-specific secret schemas | Medium | Generic entropy detectors commonly misclassify hashes, UUIDs, checksums and random IDs. v5.1 intentionally expands only explicit labels. |
+| Operational IDs are policy-dependent and off by default | Medium | Organization/user policy profiles for transaction, ticket, complaint, order and employee IDs | Low-Medium | Enabling them can substantially increase over-masking. |
+| Debug bundles contain raw PII during their retention window | Medium-High | Encrypt debug bundles, OS-protected storage, shorter TTL, or span-only diagnostics | Medium | Key management and reduced debugging convenience. v5.1 adds default TTL cleanup but not encryption. |
+| Semantic/NER behavior can drift after dependency/model updates | Medium | Pin model revisions/runtime versions and run calibration/regression CI before upgrades | Medium | More release-management work and larger pinned artifacts. |
+| Audio timing remains approximate on badly aligned ASR | High | Forced alignment/confidence-calibrated padding | High | Extra compute; larger padding can beep neighboring harmless words. v5.1 keeps uncertain corrections conservative and adds a last-resort audio coverage guard. |
+| Visual PII is outside this audio/transcript pipeline | High | Separate OCR/UIA/layout privacy subsystem and synchronized audio+screen policy | Very High | Major scope/compute increase and another false-positive surface. |
+| Synthetic regressions do not establish real production accuracy | High | Consented labeled corpus with noise, accents, repairs, overlapping speech and exact audio-mask scoring | Very High | Data collection, annotation and privacy-governance cost. |
+| Long/noisy calls can still trigger recovery latency spikes | Medium | Batch nearby recovery windows, reuse encoder features where supported, and prioritize highest-risk fields | Medium-High | More complex scheduling; batching may increase time-to-first-safe-output. |
+
+## Why several limitations are intentionally not “fixed” yet
+
+v5.1 rejects changes that would obtain recall by lowering thresholds or broadly guessing from ambiguous speech. In particular, global entropy scanning, automatic partial-value reconstruction, default diarization, and longer unbounded continuation windows were not enabled because each can increase false positives, runtime, or incorrect masking. The current policy is to mask conservatively when uncertainty affects privacy, and to leave unsupported reconstruction unresolved rather than inventing data.

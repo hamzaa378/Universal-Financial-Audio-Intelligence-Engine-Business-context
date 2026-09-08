@@ -1,4 +1,19 @@
-# Universal Financial Audio Intelligence Engine — v5.0 Correction-Aware Privacy
+# Universal Financial Audio Intelligence Engine — v5.1 Privacy Hardening
+
+v5.1 keeps the v5.0 correction-aware architecture and hardens the cases where uncertainty could accidentally expose an earlier value or leave accepted PII without audio coverage. It adds alignment-confidence and cross-speaker correction guards, reused-value protection, a last-resort accepted-PII audio guard, broader explicitly labeled secret coverage, and TTL cleanup for opt-in raw debug artifacts. No masking threshold is lowered.
+
+## v5.1 hardening improvements
+
+- **Low-confidence correction fail-safe:** weak Whisper alignment leaves both values masked instead of exposing the earlier value.
+- **Cross-speaker correction guard:** when diarization labels exist, different speakers cannot be collapsed into one self-repair.
+- **Reused-value safeguard:** a superseded value independently owned elsewhere remains masked.
+- **Accepted-PII audio coverage invariant:** accepted PII cannot silently end with zero protected audio if normal alignment fails.
+- **Expanded explicitly labeled secrets:** client/secret/signing/private keys and refresh/session/bearer tokens use the existing secret validation and example vetoes.
+- **Raw-debug retention:** opt-in unredacted diagnostic bundles are best-effort cleaned after 24 hours by default.
+- **Regression lock:** 106/106 unit tests pass; all legacy text suites remain 0 FP / 0 FN; v5.1 hardening suite is 5 TP / 0 FP / 0 FN.
+
+See `V5_1_CHANGES.md` and `LIMITATIONS_V5_1.md`.
+
 
 v5.0 builds on the full v4.12 optimized STT-Guard pipeline and adds conservative correction-aware masking for natural speech. A speaker can restart a phone/account/OTP/name/etc. value without saying a correction keyword; when timing and same-field ownership strongly establish a self-repair, the later committed value is masked and the superseded mistaken value is left unchanged. Ambiguous cases remain privacy-conservative and keep both values masked.
 

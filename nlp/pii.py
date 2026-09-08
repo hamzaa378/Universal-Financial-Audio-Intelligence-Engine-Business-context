@@ -1,4 +1,4 @@
-"""Privacy-first PII detection for financial-call transcripts (v5.0 correction-aware).
+"""Privacy-first PII detection for financial-call transcripts (v5.1 correction-aware hardening).
 
 Pipeline:
 ASR text -> ASR-aware normalization candidates -> deterministic validators -> optional
@@ -99,12 +99,15 @@ _DRIVING_LICENSE = re.compile(r"(?i)\b[A-Z]{2}[ -]?[0-9]{2}[ -]?(?:(?:19|20)[0-9
 # Explicitly assigned credentials/secrets. These are deliberately context-gated:
 # random high-entropy strings are never masked merely because they look unusual.
 _CREDENTIAL_ASSIGN = re.compile(
-    r'''(?ix)\b(?P<label>password|passcode|username|user\s*name|api[ _-]*key|access[ _-]*token|auth(?:entication)?[ _-]*token|github[ _-]*token)
-        \s*(?:is|:|=)\s*["']?(?P<value>[^\s,"';]{3,160})'''
+    r'''(?ix)\b(?P<label>password|passcode|username|user\s*name|api[ _-]*key|client[ _-]*secret|secret[ _-]*key|
+        signing[ _-]*key|private[ _-]*key|access[ _-]*token|refresh[ _-]*token|session[ _-]*token|
+        bearer[ _-]*token|auth(?:entication)?[ _-]*token|github[ _-]*token)
+        \s*(?:is|:|=)\s*["']?(?P<value>[^\s,"';]{3,200})'''
 )
 _AUTH_USE_TOKEN = re.compile(
     r'''(?ix)\b(?:please\s+)?(?:use|provide|send|authenticate\s+with)\s+(?:the\s+)?
-        (?P<label>token|api[ _-]*key|access[ _-]*token)\s+["']?(?P<value>[A-Za-z0-9][A-Za-z0-9._~+\-/=]{11,160})'''
+        (?P<label>token|api[ _-]*key|client[ _-]*secret|access[ _-]*token|refresh[ _-]*token|
+        session[ _-]*token|bearer[ _-]*token)\s+["']?(?P<value>[A-Za-z0-9][A-Za-z0-9._~+\-/=]{11,200})'''
 )
 _ENV_SECRET_ASSIGN = re.compile(
     r'''(?x)\b(?P<label>(?:[A-Za-z0-9]+_)*(?:API_KEY|SECRET_KEY|ACCESS_TOKEN|AUTH_TOKEN|TOKEN|PASSWORD))
@@ -623,7 +626,10 @@ def _find_credential_candidates(text: str) -> list[dict]:
     out=[]
     mapping={
         "password":"PASSWORD","passcode":"PASSWORD","username":"USERNAME","user name":"USERNAME",
-        "api key":"API_KEY","access token":"AUTH_TOKEN","auth token":"AUTH_TOKEN",
+        "api key":"API_KEY","client secret":"API_KEY","secret key":"API_KEY",
+        "signing key":"API_KEY","private key":"API_KEY",
+        "access token":"AUTH_TOKEN","refresh token":"AUTH_TOKEN","session token":"AUTH_TOKEN",
+        "bearer token":"AUTH_TOKEN","auth token":"AUTH_TOKEN",
         "authentication token":"AUTH_TOKEN","github token":"AUTH_TOKEN",
     }
     for m in _CREDENTIAL_ASSIGN.finditer(text):
@@ -646,7 +652,8 @@ def _find_credential_candidates(text: str) -> list[dict]:
     for m in _AUTH_USE_TOKEN.finditer(text):
         raw=m.group("value").rstrip(".,:;)")
         if not _looks_real_secret(raw): continue
-        kind="API_KEY" if "api" in m.group("label").casefold() else "AUTH_TOKEN"
+        label_norm=re.sub(r"[ _-]+"," ",m.group("label").casefold()).strip()
+        kind="API_KEY" if label_norm in {"api key","client secret"} else "AUTH_TOKEN"
         s=m.start("value"); e=s+len(raw)
         out.append(_raw_item(kind,s,e,text[s:e],0.99,"explicit_secret_use_context"))
     for m in _ENV_SECRET_ASSIGN.finditer(text):

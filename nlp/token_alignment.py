@@ -57,6 +57,7 @@ def global_word_map(asr: dict) -> list[dict]:
                 "token_id":global_idx,
                 "segment_id":seg.get("id"),
                 "segment_word_index":local_i,
+                "speaker":seg.get("speaker"),
                 "char_start":seg_start+ls,
                 "char_end":seg_start+le,
                 "time_start":float(w.get("start",seg.get("start",0.0))),
@@ -81,9 +82,12 @@ def attach_entity_tokens(asr: dict, entities: list[dict]) -> list[dict]:
             x["time_end"]=max(w["time_end"] for w in hits)
             x["alignment_confidence"]=round(sum(w["confidence"] for w in hits)/len(hits),4)
             x["alignment_method"]="whisper_word_tokens"
+            speakers=sorted({str(w.get("speaker")) for w in hits if w.get("speaker") not in (None,"","UNKNOWN")})
+            x["speakers"]=speakers
         else:
             x["token_ids"]=[]
             x["alignment_confidence"]=0.0
             x["alignment_method"]="unresolved"
+            x["speakers"]=[]
         out.append(x)
     return out

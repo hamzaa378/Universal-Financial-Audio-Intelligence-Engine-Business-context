@@ -42,6 +42,59 @@ _REPAIR_FILLER=re.compile(
 )
 _PUNCT_ONLY=re.compile(r"^[\s,.…;:\-–—]+$")
 
+# v5.1 hardening: a correction decision is allowed to *unmask* the earlier value,
+# therefore timing evidence must be stronger than ordinary masking evidence. If
+# alignment or speaker attribution is weak, keep both values protected.
+_MIN_CORRECTION_ALIGNMENT_CONF=0.68
+
+
+def _speaker_set(x: dict) -> set[str]:
+    return {str(v) for v in (x.get("speakers") or []) if v not in (None,"","UNKNOWN")}
+
+
+def _timing_evidence_safe(a: dict, b: dict) -> bool:
+    """Return True only when timing is reliable enough to expose a superseded value.
+
+    Text masking itself never depends on this gate; failing it simply leaves both
+    accepted PII values masked. When diarization is available, cross-speaker pairs are
+    never collapsed into a self-correction.
+    """
+    for x in (a,b):
+        try:
+            conf=float(x.get("alignment_confidence",0.0) or 0.0)
+        except Exception:
+            return False
+        if conf < _MIN_CORRECTION_ALIGNMENT_CONF:
+            return False
+        if not x.get("token_ids"):
+            return False
+        if str(x.get("alignment_method","")) not in {"whisper_word_tokens","late_word_alignment","mixed"}:
+            return False
+    sa,sb=_speaker_set(a),_speaker_set(b)
+    if sa and sb and sa.isdisjoint(sb):
+        return False
+    return True
+
+
+def _superseded_value_reused(items: list[dict], ia: int, ib: int, a: dict) -> bool:
+    """Protect a superseded value if it is independently owned elsewhere.
+
+    A mistaken value can itself be a real old/secondary identifier. If the same
+    normalized value appears in another strongly-owned occurrence, v5.1 refuses to
+    expose it just because one local episode looked like a correction.
+    """
+    kind=str(a.get("type","")); nv=_norm(kind,a.get("value",""))
+    if not nv:
+        return False
+    for j,x in enumerate(items):
+        if j in {ia,ib} or x.get("type")!=kind:
+            continue
+        if int(x.get("ownership_strength",0) or 0) < 3:
+            continue
+        if _norm(kind,x.get("value",""))==nv:
+            return True
+    return False
+
 
 def _norm(kind: str, value: str) -> str:
     v=str(value or "").casefold().strip()
@@ -162,6 +215,7 @@ def _timing_for_span(word_map: list[dict], start: int, end: int) -> dict:
         "time_end":max(float(w.get("time_end",0.0)) for w in hits),
         "alignment_method":"whisper_word_tokens",
         "alignment_confidence":round(sum(float(w.get("confidence",0.0)) for w in hits)/len(hits),4),
+        "speakers":sorted({str(w.get("speaker")) for w in hits if w.get("speaker") not in (None,"","UNKNOWN")}),
     }
 
 
@@ -227,6 +281,10 @@ def resolve_timed_corrections(
             ia,a=group[pos]; ib,b=group[pos+1]
             if ia in removed or not _episode_ok(text,a,b):
                 continue
+            if not _timing_evidence_safe(a,b):
+                continue
+            if _superseded_value_reused(items,ia,ib,a):
+                continue
             ok,method,gap=_timed_signal(text,a,b)
             if not ok:
                 continue
@@ -254,6 +312,11 @@ def resolve_timed_corrections(
             continue
         b=_discover_timed_replacement(text,a,word_map,candidate_validator)
         if not b:
+            continue
+        if not _timing_evidence_safe(a,b):
+            continue
+        # There is no accepted b index yet, so only exclude the source occurrence.
+        if _superseded_value_reused(items,ia,-1,a):
             continue
         ok,method,gap=_timed_signal(text,a,b)
         if not ok:

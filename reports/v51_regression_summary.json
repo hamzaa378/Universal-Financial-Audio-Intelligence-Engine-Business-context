@@ -1,0 +1,73 @@
+{
+  "version": "5.1",
+  "unit_tests": {
+    "passed": 106,
+    "failed": 0
+  },
+  "synthetic_regression": {
+    "tp": 144,
+    "fp": 0,
+    "fn": 0
+  },
+  "suites": {
+    "base": {
+      "tp": 61,
+      "fp": 0,
+      "fn": 0
+    },
+    "v46": {
+      "tp": 16,
+      "fp": 0,
+      "fn": 0
+    },
+    "v47": {
+      "tp": 18,
+      "fp": 0,
+      "fn": 0
+    },
+    "v48": {
+      "tp": 8,
+      "fp": 0,
+      "fn": 0
+    },
+    "v49": {
+      "tp": 14,
+      "fp": 0,
+      "fn": 0
+    },
+    "v410": {
+      "tp": 4,
+      "fp": 0,
+      "fn": 0
+    },
+    "v411": {
+      "tp": 6,
+      "fp": 0,
+      "fn": 0
+    },
+    "v412": {
+      "tp": 3,
+      "fp": 0,
+      "fn": 0
+    },
+    "v50": {
+      "tp": 9,
+      "fp": 0,
+      "fn": 0
+    },
+    "v51": {
+      "tp": 5,
+      "fp": 0,
+      "fn": 0
+    }
+  },
+  "detector_timing_local_ms_per_case": {
+    "v5.0": 0.2687,
+    "v5.1": 0.2718,
+    "note": "environment-specific correction_guard_v50 corpus; effectively unchanged"
+  },
+  "notes": [
+    "Synthetic regression results are not production accuracy claims.",
+    "No detector threshold was lowered in v5.1."
+  ]
+}

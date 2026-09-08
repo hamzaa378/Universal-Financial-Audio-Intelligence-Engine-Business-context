@@ -1,0 +1,81 @@
+{
+  "dataset": {
+    "pii_cases": 91,
+    "profanity_cases": 29,
+    "note": "Synthetic regression benchmark; validate with consented/labeled real call data before production claims."
+  },
+  "pii": {
+    "tp": 61,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "false_discovery_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "negative_cases": 34,
+    "negative_cases_with_fp": 0,
+    "negative_case_false_positive_rate": 0.0,
+    "mask_failure_cases": 0
+  },
+  "pii_threshold_sweep": {
+    "0.80": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.90": {
+      "precision": 1.0,
+      "recall": 0.9836065573770492,
+      "f1": 0.9917355371900827,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.93": {
+      "precision": 1.0,
+      "recall": 0.9508196721311475,
+      "f1": 0.9747899159663865,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.95": {
+      "precision": 1.0,
+      "recall": 0.8524590163934426,
+      "f1": 0.9203539823008848,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    },
+    "0.97": {
+      "precision": 1.0,
+      "recall": 0.6065573770491803,
+      "f1": 0.7551020408163265,
+      "false_discovery_rate": 0.0,
+      "negative_case_false_positive_rate": 0.0
+    }
+  },
+  "profanity": {
+    "tp": 17,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "false_discovery_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "negative_cases": 12,
+    "negative_cases_with_fp": 0,
+    "negative_case_false_positive_rate": 0.0,
+    "mask_failure_cases": 0
+  },
+  "text_privacy_efficiency": {
+    "evaluations": 600,
+    "total_seconds": 0.15877045800004908,
+    "cases_per_second": 3779.0405567754583,
+    "mean_ms": 0.26432693833442045,
+    "p50_ms": 0.1685249999923144,
+    "p95_ms": 0.6534679999958826,
+    "p99_ms": 0.8078409999825453
+  }
+}

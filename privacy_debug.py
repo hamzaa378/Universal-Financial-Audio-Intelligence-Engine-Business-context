@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -19,6 +21,30 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
 
 
+def cleanup_privacy_debug_dir(base_dir: str, ttl_hours: float = 24.0) -> dict:
+    """Delete stale opt-in raw debug runs.
+
+    Raw debug transcripts intentionally contain unredacted PII. v5.1 therefore gives
+    debug mode a default retention window. Cleanup is best-effort and never affects
+    normal privacy processing if a file is locked or cannot be removed.
+    """
+    root=Path(base_dir).expanduser().resolve()
+    if ttl_hours <= 0 or not root.exists():
+        return {"deleted":0,"errors":0}
+    cutoff=time.time()-float(ttl_hours)*3600.0
+    deleted=0; errors=0
+    for child in root.iterdir():
+        if not child.is_dir() or not child.name.startswith("run_"):
+            continue
+        try:
+            if child.stat().st_mtime < cutoff:
+                shutil.rmtree(child)
+                deleted+=1
+        except Exception:
+            errors+=1
+    return {"deleted":deleted,"errors":errors}
+
+
 def write_privacy_debug_bundle(
     raw_text: str,
     safe_text: str,
@@ -26,8 +52,10 @@ def write_privacy_debug_bundle(
     recovery: dict,
     *,
     base_dir: str,
+    ttl_hours: float = 24.0,
 ) -> dict:
     root=Path(base_dir).expanduser().resolve()
+    cleanup=cleanup_privacy_debug_dir(str(root),ttl_hours=ttl_hours)
     stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir=root/f"run_{stamp}_{uuid4().hex[:8]}"
     run_dir.mkdir(parents=True,exist_ok=False)
@@ -66,4 +94,6 @@ def write_privacy_debug_bundle(
         "recovery_telemetry":str(recovery_path),
         "comparison":str(comparison_path),
         "warning":comparison["warning"],
+        "cleanup":cleanup,
+        "ttl_hours":float(ttl_hours),
     }

@@ -491,6 +491,7 @@ def run_pipeline(
                 debug_entities,
                 privacy_recovery,
                 base_dir=SETTINGS.privacy_debug_dir,
+                ttl_hours=SETTINGS.privacy_debug_ttl_hours,
             )
         except Exception as exc:
             result["privacy"]["debug_bundle"]={"enabled":True,"error":f"{type(exc).__name__}: {exc}"}

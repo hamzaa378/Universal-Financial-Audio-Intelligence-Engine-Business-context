@@ -135,7 +135,9 @@ def spans_to_audio_intervals(asr: dict, pii: list[dict], profanity: list[dict], 
     # Guarded compatibility fallback. Character ratio is used only if token ownership
     # genuinely failed, with extra padding to reduce leakage risk.
     if unresolved:
-        for seg_global_start, seg_global_end, seg in _segment_offsets(asr.get("segments", [])):
+        covered_unresolved=set()
+        seg_offsets=_segment_offsets(asr.get("segments", []))
+        for seg_global_start, seg_global_end, seg in seg_offsets:
             seg_text=str(seg.get("text", ""))
             words=seg.get("words", []) or []
             word_spans=_word_char_spans(seg_text,words)
@@ -166,6 +168,40 @@ def spans_to_audio_intervals(asr: dict, pii: list[dict], profanity: list[dict], 
                     "alignment_method":method,
                     "alignment_confidence":round(float(align_conf),4),
                 })
+                covered_unresolved.add(id(entity))
+
+        # v5.1 audio-coverage invariant: an entity already accepted by the privacy
+        # detector must never end with zero audio protection merely because character
+        # offsets and segment text diverged. This does not create new PII decisions; it
+        # only adds a short bounded guard around the nearest ASR segment for an already
+        # accepted entity whose normal alignment produced no interval.
+        for entity in unresolved:
+            if id(entity) in covered_unresolved or not seg_offsets:
+                continue
+            es=int(entity.get("start",0)); ee=max(es+1,int(entity.get("end",es+1)))
+            def char_distance(row):
+                gs,ge,_=row
+                if ee < gs: return gs-ee
+                if es > ge: return es-ge
+                return 0
+            gs,ge,seg=min(seg_offsets,key=char_distance)
+            seg_text=str(seg.get("text",""))
+            seg_start=float(seg.get("start",0.0)); seg_end=float(seg.get("end",seg_start))
+            duration=max(0.0,seg_end-seg_start)
+            if duration<=0.0:
+                continue
+            denom=max(1,len(seg_text))
+            anchor=max(0,min(len(seg_text),(es-gs)))
+            center=seg_start+duration*(anchor/denom)
+            half=min(0.70,max(0.28,duration*0.18))
+            intervals.append({
+                "start":max(seg_start,center-half-pad_s-0.10),
+                "end":min(seg_end,max(center+half+pad_s+0.10,center+0.20)),
+                "types":[entity.get("type","PII")],
+                "confidence":round(float(entity.get("confidence",0.0)),4),
+                "alignment_method":"accepted_pii_nearest_segment_guard",
+                "alignment_confidence":0.0,
+            })
     return _merge_intervals(intervals)
 
 def _apply_fade(mask: np.ndarray, sr: int, fade_ms: float = 8.0) -> np.ndarray:

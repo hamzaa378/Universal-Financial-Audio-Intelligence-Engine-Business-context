@@ -1,0 +1,8 @@
+{"id":"v51_client_secret","text":"My client secret is AbCDef1234567890_$xy.","expected":[{"type":"API_KEY","value":"AbCDef1234567890_$xy"}]}
+{"id":"v51_refresh_token","text":"My refresh token is AbCDef1234567890.tokenXYZ.","expected":[{"type":"AUTH_TOKEN","value":"AbCDef1234567890.tokenXYZ"}]}
+{"id":"v51_session_token","text":"My session token is AbCDef1234567890.tokenXYZ.","expected":[{"type":"AUTH_TOKEN","value":"AbCDef1234567890.tokenXYZ"}]}
+{"id":"v51_bearer_token","text":"My bearer token is AbCDef1234567890.tokenXYZ.","expected":[{"type":"AUTH_TOKEN","value":"AbCDef1234567890.tokenXYZ"}]}
+{"id":"v51_signing_key","text":"My signing key is AbCDef1234567890_$xy.","expected":[{"type":"API_KEY","value":"AbCDef1234567890_$xy"}]}
+{"id":"v51_client_secret_example","text":"The documentation example says client secret is YOUR_API_KEY_HERE.","expected":[]}
+{"id":"v51_refresh_token_explanation","text":"A refresh token is used to obtain a new access token.","expected":[]}
+{"id":"v51_bearer_explanation","text":"A bearer token may look like a long random string.","expected":[]}
