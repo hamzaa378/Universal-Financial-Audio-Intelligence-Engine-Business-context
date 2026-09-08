@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "captured_at_utc": "2026-09-07T17:22:55.592125+00:00",
+  "python": "3.13.5",
+  "platform": "Linux-6.18.35-x86_64-with-glibc2.41",
+  "models": {
+    "semantic": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "ner": "onnx-community/multilang-pii-ner-ONNX"
+  },
+  "packages": {
+    "faster-whisper": null,
+    "ctranslate2": null,
+    "onnxruntime": null,
+    "onnxruntime-gpu": null,
+    "fastembed": null,
+    "tokenizers": null,
+    "transformers": null,
+    "numpy": "2.3.5",
+    "soundfile": "0.13.1",
+    "soxr": "1.0.0",
+    "huggingface-hub": "1.16.1",
+    "pyannote.audio": "4.0.4"
+  },
+  "changes_since_previous": []
+}

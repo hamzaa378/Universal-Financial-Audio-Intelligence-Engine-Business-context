@@ -22,7 +22,7 @@ from analysis_ai.diarization import diarize, assign_speakers
 from decision_ai.utterance_ai import analyze_utterance
 from audio_privacy import create_protected_audio
 from nlp.token_alignment import attach_entity_tokens
-from nlp.corrections import resolve_timed_corrections
+from nlp.corrections import resolve_timed_corrections, resolve_partial_corrections
 from config import SETTINGS
 from privacy_debug import write_privacy_debug_bundle
 
@@ -381,6 +381,15 @@ def run_pipeline(
     internal_privacy["pii"],correction_audit=resolve_timed_corrections(
         text,internal_privacy["pii"],asr,candidate_validator=_correction_candidate_validator
     )
+    # v5.2: deterministic partial self-repairs (for example "last digit is one")
+    # are resolved only after an already-accepted owned numeric PII value. The
+    # corrected full identifier is never reconstructed or stored; only the spoken
+    # replacement fragment is protected.
+    internal_privacy["pii"],partial_correction_audit=resolve_partial_corrections(
+        text,internal_privacy["pii"],asr
+    )
+    if partial_correction_audit:
+        correction_audit.extend(partial_correction_audit)
     if correction_audit:
         # The earlier mistaken value must become visible again in the safe transcript
         # while the final committed value remains masked. Re-render from the same
@@ -492,6 +501,7 @@ def run_pipeline(
                 privacy_recovery,
                 base_dir=SETTINGS.privacy_debug_dir,
                 ttl_hours=SETTINGS.privacy_debug_ttl_hours,
+                include_raw=bool(SETTINGS.privacy_debug_raw),
             )
         except Exception as exc:
             result["privacy"]["debug_bundle"]={"enabled":True,"error":f"{type(exc).__name__}: {exc}"}

@@ -16,7 +16,7 @@ PII_TYPES=["EMAIL","PHONE","PAN","IFSC","UPI","CARD","AADHAAR","ACCOUNT_NUMBER",
 
 st.set_page_config(page_title="Financial Audio Intelligence", page_icon="🎙️", layout="wide")
 st.title("Universal Financial Audio Intelligence Engine")
-st.caption("v5.1 Privacy Hardening — upload or record a call → transcribe, resolve self-corrections, mask and listen to a protected audio copy")
+st.caption("v5.2 Partial-Correction Hardening — upload or record a call → transcribe, resolve self-corrections, mask and listen to a protected audio copy")
 
 with st.sidebar:
     st.header("Privacy policy")
@@ -278,7 +278,7 @@ def _show_last_audio_result():
     if correction.get("count",0):
         st.info(
             f"Correction-aware masking resolved {correction.get('count',0)} self-repair(s): "
-            "the later committed value was protected and the superseded mistaken value was left unchanged."
+            "the committed correction fragment/value was protected; a superseded value is exposed only when timing and ownership make that safe."
         )
         with st.expander("Correction resolution audit"):
             st.dataframe(correction.get("events",[]),width="stretch",hide_index=True)
@@ -286,7 +286,11 @@ def _show_last_audio_result():
 
     debug=r.get("privacy",{}).get("debug_bundle") or {}
     if debug.get("enabled"):
-        st.warning(debug.get("warning","Privacy debug artifacts are enabled and may contain raw PII."))
+        
+        if debug.get("raw_enabled"):
+            st.warning(debug.get("warning","Raw privacy debug transcript is enabled and may contain PII."))
+        else:
+            st.info(debug.get("warning","Privacy debug is span-only; raw ASR transcript was not written."))
         with st.expander("Privacy debug artifact paths"):
             st.json(debug)
 

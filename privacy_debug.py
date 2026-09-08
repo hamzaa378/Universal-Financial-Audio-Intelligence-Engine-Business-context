@@ -53,6 +53,7 @@ def write_privacy_debug_bundle(
     *,
     base_dir: str,
     ttl_hours: float = 24.0,
+    include_raw: bool = True,
 ) -> dict:
     root=Path(base_dir).expanduser().resolve()
     cleanup=cleanup_privacy_debug_dir(str(root),ttl_hours=ttl_hours)
@@ -66,7 +67,12 @@ def write_privacy_debug_bundle(
     recovery_path=run_dir/"recovery_telemetry.json"
     comparison_path=run_dir/"comparison.json"
 
-    raw_path.write_text(raw_text,encoding="utf-8")
+    if include_raw:
+        raw_path.write_text(raw_text,encoding="utf-8")
+        try:
+            raw_path.chmod(0o600)
+        except Exception:
+            pass
     safe_path.write_text(safe_text,encoding="utf-8")
     # Strip any internal raw alternate-ASR content if a future implementation adds it.
     public_entities=[]
@@ -82,13 +88,14 @@ def write_privacy_debug_bundle(
         "accepted_redaction_spans":len(public_entities),
         "raw_sha256":_sha256_text(raw_text),
         "safe_sha256":_sha256_text(safe_text),
-        "warning":"RAW DEBUG ARTIFACT CONTAINS UNREDACTED TRANSCRIPT/PII. Delete after diagnosis.",
+        "warning":("RAW DEBUG ARTIFACT CONTAINS UNREDACTED TRANSCRIPT/PII. Delete after diagnosis."
+                   if include_raw else "Raw transcript file was NOT written. Enable FINAI_PRIVACY_DEBUG_RAW=1 only for consented/synthetic diagnosis."),
     }
     comparison_path.write_text(json.dumps(comparison,indent=2),encoding="utf-8")
     return {
         "enabled":True,
         "directory":str(run_dir),
-        "raw_transcript":str(raw_path),
+        "raw_transcript":str(raw_path) if include_raw else None,
         "safe_transcript":str(safe_path),
         "redaction_spans":str(spans_path),
         "recovery_telemetry":str(recovery_path),
@@ -96,4 +103,5 @@ def write_privacy_debug_bundle(
         "warning":comparison["warning"],
         "cleanup":cleanup,
         "ttl_hours":float(ttl_hours),
+        "raw_enabled":bool(include_raw),
     }

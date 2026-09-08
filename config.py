@@ -35,6 +35,7 @@ class Settings:
     privacy_debug_artifacts: bool = _env_bool("FINAI_PRIVACY_DEBUG_ARTIFACTS", False)
     privacy_debug_dir: str = os.getenv("FINAI_PRIVACY_DEBUG_DIR", "privacy_debug")
     privacy_debug_ttl_hours: float = float(os.getenv("FINAI_PRIVACY_DEBUG_TTL_HOURS", "24"))
+    privacy_debug_raw: bool = _env_bool("FINAI_PRIVACY_DEBUG_RAW", False)
     financial_vocab: list[str] = field(default_factory=lambda: [
         "EMI", "APR", "KYC", "e-KYC", "NPA", "NBFC", "RBI", "SEBI", "CIBIL",
         "foreclosure", "prepayment", "outstanding balance", "overdue", "principal",

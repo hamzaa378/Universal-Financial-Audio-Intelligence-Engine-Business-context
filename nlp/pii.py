@@ -1,4 +1,4 @@
-"""Privacy-first PII detection for financial-call transcripts (v5.1 correction-aware hardening).
+"""Privacy-first PII detection for financial-call transcripts (v5.2 partial-correction hardening).
 
 Pipeline:
 ASR text -> ASR-aware normalization candidates -> deterministic validators -> optional

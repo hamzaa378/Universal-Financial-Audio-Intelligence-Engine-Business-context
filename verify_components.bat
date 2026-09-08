@@ -11,9 +11,14 @@ set "FINAI_DEVICE=cuda"
 set "FINAI_COMPUTE_TYPE=float16"
 set "FINAI_STRICT_GPU=1"
 set "FINAI_FORCE_CPU="
-echo Running full v5.1 component verification...
+echo Running full v5.2 component verification...
 "%PY%" tools\startup_verify.py --model small --semantic --ner
 set "RC=%ERRORLEVEL%"
+if "%RC%"=="0" (
+  echo.
+  echo Capturing privacy runtime fingerprint...
+  "%PY%" tools\runtime_fingerprint.py --output reports\runtime_fingerprint.json
+)
 echo.
 pause
 exit /b %RC%

@@ -334,3 +334,111 @@ def resolve_timed_corrections(
     kept=[x for i,x in enumerate(items) if i not in removed]+additions
     kept.sort(key=lambda x:(int(x.get("start",0)),int(x.get("end",0))))
     return kept,audit
+
+
+# v5.2 partial self-correction.  A partial edit never becomes a generic short-number
+# detector: it is only considered after an already accepted, strongly-owned numeric
+# PII value and only for an explicit suffix edit with an exact replacement arity.
+_PARTIAL_EDIT_TYPES={"PHONE","CARD","ACCOUNT_NUMBER","OTP","CVV","PINCODE","AADHAAR"}
+_PARTIAL_CONTEXT_VETO=re.compile(
+    r"(?i)\b(?:example|sample|documentation|docs?|manual|tutorial|training|test\s+(?:case|value|data)|"
+    r"reference|ticket|order|transaction|complaint|experiment|invoice|page)\b"
+)
+_COUNT_WORD={"one":1,"two":2,"three":3,"four":4}
+_DIGIT_WORD={"zero":"0","oh":"0","o":"0","one":"1","two":"2","three":"3","four":"4",
+             "five":"5","six":"6","seven":"7","eight":"8","nine":"9"}
+_PARTIAL_EDIT_RE=re.compile(
+    r"(?ix)\b(?:"
+    r"(?:(?:change|replace|correct|make)\s+(?:the\s+)?)?"
+    r"(?:last|final)\s+(?:(one|two|three|four|[1-4])\s+)?digit(?:s)?\s+"
+    r"(?:is|are|to|with|as|should\s+be|must\s+be)\s+"
+    r")"
+    r"((?:[0-9](?:[\s-]*[0-9]){0,3})|"
+    r"(?:(?:zero|oh|o|one|two|three|four|five|six|seven|eight|nine)"
+    r"(?:[\s-]+(?:zero|oh|o|one|two|three|four|five|six|seven|eight|nine)){0,3}))\b"
+)
+
+
+def _replacement_digits(raw: str) -> str:
+    raw=str(raw or "").strip().casefold()
+    direct=re.sub(r"\D","",raw)
+    if direct:
+        return direct
+    out=[]
+    for tok in re.findall(r"[a-z]+",raw):
+        if tok not in _DIGIT_WORD:
+            return ""
+        out.append(_DIGIT_WORD[tok])
+    return "".join(out)
+
+
+def _declared_digit_count(raw_count: str | None, replacement: str) -> int | None:
+    if raw_count:
+        key=str(raw_count).casefold()
+        return int(key) if key.isdigit() else _COUNT_WORD.get(key)
+    # Singular `digit` without a number is captured as an omitted count.  The regex
+    # does not expose singular/plural directly, so only infer one when replacement is
+    # exactly one digit. Multi-digit edits must state their arity explicitly.
+    return 1 if len(replacement)==1 else None
+
+
+def resolve_partial_corrections(
+    text: str, entities: Iterable[dict], asr: dict,
+) -> tuple[list[dict],list[dict]]:
+    """Mask only the spoken replacement fragment for deterministic suffix edits.
+
+    Example: `My phone is 9876543210. Last digit is 1.` can leave the superseded
+    number visible while protecting only `1`, provided Whisper timing is strong and
+    same-speaker. If timing is weak, both old value and replacement fragment stay
+    masked. The function never reconstructs or stores the corrected full identifier.
+    """
+    items=sorted((dict(x) for x in entities),key=lambda x:(int(x.get("start",0)),int(x.get("end",0))))
+    additions=[]; removed=set(); audit=[]
+    word_map=global_word_map(asr)
+    for ia,a in enumerate(items):
+        kind=str(a.get("type",""))
+        if kind not in _PARTIAL_EDIT_TYPES or int(a.get("ownership_strength",0) or 0)<3:
+            continue
+        base=_norm(kind,a.get("value",""))
+        if not base.isdigit():
+            continue
+        search_start=int(a.get("end",0)); search_end=min(len(text),search_start+150)
+        tail=text[search_start:search_end]
+        # A new PII field or a public/example role ends the edit episode.
+        hard=_NEW_FIELD.search(tail)
+        if hard:
+            tail=tail[:hard.start()]
+        if _PARTIAL_CONTEXT_VETO.search(tail):
+            continue
+        m=_PARTIAL_EDIT_RE.search(tail)
+        if not m:
+            continue
+        # Do not jump through a long unrelated sentence to reach the edit.
+        pre=tail[:m.start()]
+        if len(re.findall(r"[A-Za-z]+",pre))>6 or _PARALLEL_ROLE.search(pre) or _LIST_JOIN.search(pre):
+            continue
+        repl=_replacement_digits(m.group(2))
+        count=_declared_digit_count(m.group(1),repl)
+        if not repl or count is None or count!=len(repl) or not (1<=count<=4) or len(base)<count:
+            continue
+        rs=search_start+m.start(2); re_=search_start+m.end(2)
+        b={
+            "type":kind,"start":rs,"end":re_,"value":text[rs:re_],"confidence":0.995,
+            "ownership_strength":4,"partial_correction":True,
+            "evidence":"deterministic_suffix_partial_correction",
+        }
+        b.update(_timing_for_span(word_map,rs,re_))
+        # The replacement itself is always protected once the explicit edit is proven.
+        additions.append(b)
+        safe_to_expose_old=_timing_evidence_safe(a,b) and not _superseded_value_reused(items,ia,-1,a)
+        if safe_to_expose_old:
+            removed.add(ia)
+        audit.append({
+            "type":kind,"superseded_start":int(a.get("start",0)),"superseded_end":int(a.get("end",0)),
+            "final_start":rs,"final_end":re_,"method":"deterministic_suffix_partial_edit",
+            "digit_count":count,"wrong_value_masked":not safe_to_expose_old,
+            "final_value_masked":True,"partial_fragment_only":True,"reconstructed_value_stored":False,
+        })
+    kept=[x for i,x in enumerate(items) if i not in removed]+additions
+    kept.sort(key=lambda x:(int(x.get("start",0)),int(x.get("end",0))))
+    return kept,audit

@@ -1,0 +1,5 @@
+{"id":"v52-negative-standalone-repair-number","text":"I made a mistake. 124981.","expected":[]}
+{"id":"v52-negative-standalone-last-digit","text":"The last digit is 1.","expected":[]}
+{"id":"v52-negative-standalone-last-two","text":"Change the last two digits to 42.","expected":[]}
+{"id":"v52-negative-example-edit","text":"The documentation example says the last digit is 1.","expected":[]}
+{"id":"v52-negative-ticket-after-mistake","text":"I made a mistake. Support ticket 124981 is already closed.","expected":[]}

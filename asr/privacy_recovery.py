@@ -345,18 +345,166 @@ def _confirm_expected(kind: str, alt: dict) -> dict | None:
     }
 
 
+
+# v5.2: when a sensitive value was already conservatively audio-guarded, a nearby
+# explicit self-repair can carry the field type forward without another ASR decode.
+# The new fragment must independently pass the normal type validator under a synthetic
+# ownership prefix, so this is not a generic short-number detector.
+_POST_GUARD_REPAIR=re.compile(
+    r"(?ix)\b(?:i\s+(?:made\s+)?a?\s*mistake|that(?:'s|\s+is)\s+(?:wrong|incorrect)|"
+    r"sorry|correction|i\s+mean|actually|make\s+that|let\s+me\s+correct(?:\s+that)?)\b"
+)
+_POST_GUARD_BLOCK=re.compile(
+    r"(?i)\b(?:reference|ticket|order|transaction|complaint|experiment|invoice|page|"
+    r"example|sample|documentation|manual|test\s+(?:case|value|data))\b"
+)
+_POST_GUARD_PARTIAL_TYPES={"PHONE","CARD","ACCOUNT_NUMBER","OTP","CVV","PINCODE","AADHAAR"}
+_POST_GUARD_PARTIAL=re.compile(
+    r"(?ix)\b(?:"
+    r"(?:(?:change|replace|correct|make)\s+(?:the\s+)?)?"
+    r"(?:last|final)\s+(?:(one|two|three|four|[1-4])\s+)?digit(?:s)?\s+"
+    r"(?:is|are|to|with|as|should\s+be|must\s+be)\s+"
+    r")"
+    r"((?:[0-9](?:[\s-]*[0-9]){0,3})|"
+    r"(?:(?:zero|oh|o|one|two|three|four|five|six|seven|eight|nine)"
+    r"(?:[\s-]+(?:zero|oh|o|one|two|three|four|five|six|seven|eight|nine)){0,3}))\b"
+)
+_POST_GUARD_COUNT={"one":1,"two":2,"three":3,"four":4}
+_POST_GUARD_DIGIT={"zero":"0","oh":"0","o":"0","one":"1","two":"2","three":"3","four":"4","five":"5","six":"6","seven":"7","eight":"8","nine":"9"}
+
+
+def _post_guard_replacement_digits(raw: str) -> str:
+    d=re.sub(r"\D","",str(raw or ""))
+    if d: return d
+    out=[]
+    for tok in re.findall(r"[A-Za-z]+",str(raw or "").casefold()):
+        if tok not in _POST_GUARD_DIGIT: return ""
+        out.append(_POST_GUARD_DIGIT[tok])
+    return "".join(out)
+
+_OWNERSHIP_PREFIX={
+    "NAME":"My name is ","PHONE":"My phone number is ","EMAIL":"My email is ",
+    "PAN":"My PAN is ","AADHAAR":"My Aadhaar number is ","IFSC":"My IFSC is ",
+    "UPI":"My UPI ID is ","CARD":"My card number is ","ACCOUNT_NUMBER":"My account number is ",
+    "OTP":"My OTP is ","CVV":"My CVV is ","PINCODE":"My PIN code is ",
+    "DOB":"My date of birth is ","PASSPORT":"My passport number is ",
+    "VOTER_ID":"My voter ID is ","DRIVING_LICENSE":"My driving licence number is ",
+    "ADDRESS":"My address is ","NAME":"My full name is ",
+}
+
+
+def _validated_primary_correction(text: str, kind: str, start: int, limit: int=64) -> dict | None:
+    prefix=_OWNERSHIP_PREFIX.get(kind)
+    if not prefix:
+        return None
+    end=min(len(text),start+max(16,int(limit)))
+    tail=text[start:end]
+    # Stop before another field or public/operational role.
+    hard=_RECOVERY_NEXT_FIELD.search(tail)
+    if hard: tail=tail[:hard.start()]
+    if _POST_GUARD_BLOCK.search(tail):
+        return None
+    lead=re.match(r"[\s,.;:…\-–—]*",tail)
+    lead_n=lead.end() if lead else 0
+    body=tail[lead_n:]
+    if not body:
+        return None
+    synthetic=prefix+body
+    matches=[x for x in detect_pii(synthetic,min_confidence=0.72,use_semantic=False,use_ner=False) if x.get("type")==kind]
+    if not matches:
+        return None
+    item=min(matches,key=lambda x:int(x.get("start",0)))
+    rs=start+lead_n+max(0,int(item.get("start",0))-len(prefix))
+    re_=start+lead_n+max(0,int(item.get("end",0))-len(prefix))
+    if re_<=rs or rs<start or re_>end:
+        return None
+    return {"type":kind,"char_start":rs,"char_end":re_}
+
+
+def _post_guard_correction_guards(asr: dict, accepted_pii: list[dict], audit: list[dict]) -> list[dict]:
+    text=str(asr.get("text","") or "")
+    out=[]
+    for row in list(audit):
+        if row.get("status")!="conservative_audio_guard" or row.get("source")=="correction_continuation":
+            continue
+        kind=str(row.get("type",""))
+        base_end=int(row.get("char_end",0) or 0)
+        if base_end<=0 or base_end>=len(text):
+            continue
+        window=text[base_end:min(len(text),base_end+180)]
+        # A deterministic partial suffix edit is itself sensitive even when the
+        # original guarded value could not be reconstructed. Protect only the spoken
+        # replacement fragment; never synthesize a full identifier.
+        if kind in _POST_GUARD_PARTIAL_TYPES and not _POST_GUARD_BLOCK.search(window):
+            pm=_POST_GUARD_PARTIAL.search(window)
+            if pm:
+                repl=_post_guard_replacement_digits(pm.group(2))
+                raw_count=pm.group(1)
+                count=(int(raw_count) if raw_count and raw_count.isdigit() else _POST_GUARD_COUNT.get(str(raw_count or "").casefold()))
+                if count is None and len(repl)==1: count=1
+                if repl and count==len(repl) and 1<=count<=4:
+                    cs=base_end+pm.start(2); ce=base_end+pm.end(2)
+                    timing=_span_time(asr,cs,ce)
+                    if timing and timing[2]>=0.55:
+                        ts,te,conf=timing
+                        out.append({
+                            "type":kind,"start":max(0.0,ts-0.10),"end":max(ts,te+0.12),"confidence":0.90,
+                            "alignment_method":"post_guard_partial_correction_alignment",
+                            "alignment_confidence":round(float(conf),4),"recovery_status":"conservative_audio_guard",
+                            "char_start":cs,"char_end":ce,"source":"correction_continuation",
+                            "reason":"partial_edit_after_guarded_value",
+                        })
+                        continue
+        repair=_POST_GUARD_REPAIR.search(window)
+        if not repair:
+            continue
+        # Do not carry ownership through a new field or operational/example context.
+        before=window[:repair.start()]
+        if _RECOVERY_NEXT_FIELD.search(before) or _POST_GUARD_BLOCK.search(before):
+            continue
+        cand_start=base_end+repair.end()
+        candidate=_validated_primary_correction(text,kind,cand_start,limit=72)
+        if not candidate:
+            continue
+        cs,ce=int(candidate["char_start"]),int(candidate["char_end"])
+        if _accepted_in_span(accepted_pii,kind,cs,ce):
+            continue
+        # The repair must be close. More than a few lexical words after the repair cue
+        # indicates a new statement rather than a direct correction.
+        bridge=text[base_end+repair.end():cs]
+        if len(re.findall(r"[A-Za-z]+",bridge))>3 or _POST_GUARD_BLOCK.search(bridge) or _RECOVERY_NEXT_FIELD.search(bridge):
+            continue
+        timing=_span_time(asr,cs,ce)
+        if not timing:
+            continue
+        ts,te,conf=timing
+        if conf < 0.55:
+            # Low confidence is still protected by the original field guard, but we do
+            # not create a second possibly unrelated transcript replacement.
+            continue
+        out.append({
+            "type":kind,"start":max(0.0,ts-0.10),"end":max(ts,te+0.12),"confidence":0.90,
+            "alignment_method":"post_guard_correction_primary_alignment",
+            "alignment_confidence":round(float(conf),4),"recovery_status":"conservative_audio_guard",
+            "char_start":cs,"char_end":ce,"source":"correction_continuation",
+            "reason":"validated_value_after_guarded_self_repair",
+        })
+    return out
+
+
 def recover_privacy_audio_intervals(
     audio: np.ndarray, sr: int, asr: dict, accepted_pii: Iterable[dict],
     *, model_name: str | None=None, max_windows: int=4, conservative_on_failure: bool=True,
 ) -> dict:
     """Return audio-only redaction intervals plus privacy-safe recovery telemetry."""
     total0=time.perf_counter()
-    plans=plan_privacy_recovery(asr,accepted_pii,max_windows=max_windows)
+    accepted=list(accepted_pii or [])
+    plans=plan_privacy_recovery(asr,accepted,max_windows=max_windows)
     intervals=[]; audit=[]
     telemetry={
         "windows_planned":len(plans),"windows_attempted":0,"recovered":0,
-        "guarded":0,"unresolved":0,"decode_inference_ms":0.0,"total_ms":0.0,
-        "by_type":{},
+        "guarded":0,"unresolved":0,"direct_correction_guards":0,
+        "decode_inference_ms":0.0,"total_ms":0.0,"by_type":{},
     }
     def _type_stats(kind: str) -> dict:
         return telemetry["by_type"].setdefault(kind,{
@@ -416,6 +564,23 @@ def recover_privacy_audio_intervals(
             "alternate_decode_error":bool(alt.get("error")),"decode_ms":round(decode_ms,3),
             "alternate_text_present":bool(alt.get("text")),
         })
+    # v5.2: if a guarded field is explicitly corrected in the next short utterance,
+    # protect the corrected fragment directly from primary-ASR timing. This costs no
+    # additional Whisper inference and produces a second [TYPE AUDIO PROTECTED] marker.
+    direct=_post_guard_correction_guards(asr,accepted,audit) if conservative_on_failure else []
+    for g in direct:
+        intervals.append(g)
+        kind=str(g.get("type","PII")); tstats=_type_stats(kind)
+        telemetry["guarded"]+=1; telemetry["direct_correction_guards"]+=1; tstats["guarded"]+=1
+        audit.append({
+            "type":kind,"status":"conservative_audio_guard","source":"correction_continuation",
+            "reason":"validated_value_after_guarded_self_repair",
+            "time_start":round(float(g["start"]),3),"time_end":round(float(g["end"]),3),
+            "primary_alignment_confidence":g.get("alignment_confidence"),
+            "char_start":int(g.get("char_start",0)),"char_end":int(g.get("char_end",0)),
+            "decode_ms":0.0,"alternate_text_present":False,
+        })
+
     telemetry["decode_inference_ms"]=round(float(telemetry["decode_inference_ms"]),3)
     for stats in telemetry.get("by_type",{}).values():
         stats["decode_inference_ms"]=round(float(stats.get("decode_inference_ms",0.0)),3)

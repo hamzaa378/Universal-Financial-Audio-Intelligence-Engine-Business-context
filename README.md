@@ -1,4 +1,19 @@
-# Universal Financial Audio Intelligence Engine — v5.1 Privacy Hardening
+# Universal Financial Audio Intelligence Engine — v5.2 Partial-Correction Hardening
+
+v5.2 adds deterministic partial self-correction, post-audio-guard correction protection, safer span-only diagnostics by default, and runtime/model drift fingerprinting. It keeps all v5.1 privacy thresholds and existing detection paths.
+
+## v5.2 highlights
+
+- `My OTP is <unresolved>. I made a mistake. 124981.` → `My OTP is [OTP AUDIO PROTECTED] I made a mistake. [OTP AUDIO PROTECTED].`
+- `My phone number is 9876543210. Last digit is 1.` protects only the spoken correction fragment when timing/ownership safely establish the repair; ambiguous timing keeps both protected.
+- Corrected full identifiers are not reconstructed or stored for partial edits.
+- Example/documentation/operational contexts and replacement-length mismatches are rejected.
+- Debug artifacts are safe/span-only unless `FINAI_PRIVACY_DEBUG_RAW=1` is explicitly enabled.
+- `verify_components.bat` now captures privacy runtime/model drift.
+- Regression lock: 114/114 unit tests; accumulated text suites 144 TP / 0 FP / 0 FN.
+
+See `V5_2_CHANGES.md` and `LIMITATIONS_V5_2.md`.
+
 
 v5.1 keeps the v5.0 correction-aware architecture and hardens the cases where uncertainty could accidentally expose an earlier value or leave accepted PII without audio coverage. It adds alignment-confidence and cross-speaker correction guards, reused-value protection, a last-resort accepted-PII audio guard, broader explicitly labeled secret coverage, and TTL cleanup for opt-in raw debug artifacts. No masking threshold is lowered.
 
